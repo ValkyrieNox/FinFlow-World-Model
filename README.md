@@ -115,8 +115,7 @@ python3 scripts/evaluate_rollout.py \
 
 ### 下载与解压权重
 
-> 📦 **下载链接（网盘）**：`<待填写：网盘链接>`
-> 🔑 **提取码**：`<待填写：提取码（如无可删除此行）>`
+> 📦 **下载链接（北大网盘）**：<https://disk.pku.edu.cn/link/AA5FFF5F5BD0AF446AA0BC210401887C2D>
 
 下载到的文件为 `checkpoints.tar.gz`。在仓库根目录解压，即可还原 `release/checkpoints/` 结构：
 

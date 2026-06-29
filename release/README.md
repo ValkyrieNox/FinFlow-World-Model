@@ -7,7 +7,7 @@
 
 ### 权重下载与解压
 
-> 📦 **网盘链接**：`<待填写：网盘链接>`　🔑 **提取码**：`<待填写>`
+> 📦 **北大网盘**：<https://disk.pku.edu.cn/link/AA5FFF5F5BD0AF446AA0BC210401887C2D>
 
 ```bash
 tar -xzf release/checkpoints.tar.gz -C release/   # 在仓库根目录解压
