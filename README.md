@@ -1,231 +1,131 @@
-# FinFlow — V3 Heston World-Model Pipeline
+# FinFlow — 面向区制切换市场的动作条件流匹配世界模型
 
-A complete V3 implementation of the autoregressive financial world model
-described in [idea/2/02_pipelines.md](idea/2/02_pipelines.md):
+本仓库是论文 **《面向区制切换市场的动作条件流匹配世界模型：从两阶段到联合转移流匹配，及一步 on-policy flow-map 蒸馏》**（[`paper/main_zh.tex`](paper/main_zh.tex)，编译版 [`paper/main_zh.pdf`](paper/main_zh.pdf)）的完整实现与实验产物。
 
-- **Data**: Andersen-QE Heston with optional 3-regime Markov mixture and a
-  Carr-Madan FFT pricer for ground-truth option prices.
-- **Stage 1 teachers**: two Flow Matching transition kernels
-  `p(v_{t+1}|v_t, a_t)` and `p(r_{t+1}|v_{t+1}, v_t, r_t, a_t)`.
-- **Stage 2 students**: Mean Flow (Geng 2025, NeurIPS Oral) and Consistency
-  Distillation (Song 2023, ICML) 1-NFE generators distilled from each teacher.
-- **Inference**: unified samplers (FM teacher / MF / CD) and an autoregressive
-  rollout that uses any pair of vol+ret samplers interchangeably.
-- **Evaluation**: 5 Cont (2001) stylized facts + marginal/path Wasserstein-1 +
-  Carr-Madan or MC-oracle pricing RMSE / MAPE.
-- **Baseline**: Quant GAN with Lambert-W preprocessing and WGAN-GP.
-- **Teacher tuning**: Lambert-W variance-kernel sweeps and optional
-  QGAN-style pathwise critic fine-tuning, both written to separate run
-  directories so prior evaluation outputs remain reproducible.
-
-Design docs:
-- [idea/2/02_pipelines.md](idea/2/02_pipelines.md) — V1 / V2 / V3 framing
-- [idea/2/03_V3_References.md](idea/2/03_V3_References.md) — literature backing every
-  data / model / evaluation choice
-- [idea/2/04_v3_implementation.md](idea/2/04_v3_implementation.md) — end-to-end V3
-  plan, code-progress index, literature reverse-lookup
-- [idea/2/11_P1Implementation.md](idea/2/11_P1Implementation.md) — P1
-  methodology hooks and verification notes
-
-## Layout
+模型把市场视为一个 **动作条件的世界模型**：外部智能体在每一步选择离散市场区制（正常 / 高波动 / 崩盘）来驱动一个三区制马尔可夫切换 Heston 过程。模型学习单步转移核
 
 ```
-finflow/
-  data/                    # Heston QE + Carr-Madan + V3 vol/ret datasets
-  models/                  # TransitionFM + MeanFlowStudent + ConsistencyStudent
-  training.py              # joint trainer + V3 vol/ret trainers (progress bars)
-  distillation/            # Mean Flow + Consistency distillation trainers
-  inference/               # unified samplers + autoregressive rollout
-  eval/                    # stylized facts + distances + pricing + report builder
-  baselines/               # Quant GAN (TCN + Lambert-W + WGAN-GP)
-scripts/                   # CLI entry points (one per command)
-tests/                     # full pytest suite (86 tests)
+p_θ(log v_{t+1}, r_t | log v_t, r_{t-1}, a_t)
 ```
 
-## End-to-end workflow
+并在自由 rollout（无教师强制）下自回归推演一整个交易年（252 步）。主指标为生成路径上欧式期权价格相对 10 万条 MC oracle 的 **定价 RMSE**。
+
+## 方法主线（与论文一致）
+
+| 阶段 | 方法 | 论文章节 | 代码入口 |
+|------|------|----------|----------|
+| 基线 | Quant-GAN / GARCH(1,1)-t / 移动块自助 | §相关工作、§实验 | `scripts/train_quant_gan.py`, `scripts/sample_quant_gan.py`, `analysis/remote_scripts/baseline_generate.py` |
+| 第一步 | 两阶段转移流匹配 + 调度采样 | §4.1.1 | `scripts/train_vol_trans.py`, `scripts/train_ret_trans.py`, `scripts/train_transition_fm.py` |
+| 微调（探索） | SIGMA 路径分布微调（严格正常评分） | §4.1.2 | `scripts/pathwise_teacher_combined.py`, `finflow/pathwise_teacher.py` |
+| 微调（反例） | 可微定价微调 | §4.1.3 | `scripts/finetune_flow_map_pricing.py` |
+| **主方法** | **联合转移流匹配 teacher（joint-FM）** | §4.1.4 | `scripts/train_joint_trans.py`, `finflow/models/transition_fm.py` |
+| 一步蒸馏对比 | CD / Mean-Flow / flow-map | §4.2.1 | `scripts/distill_consistency.py`, `scripts/distill_mean_flow.py`, `scripts/distill_flow_map.py` |
+| **主蒸馏** | **on-policy teacher-endpoint 修正** | §4.2.2 | `scripts/finetune_flow_map_onpolicy.py` |
+
+## 核心结果（论文表 1，未校准 raw 评测）
+
+| 模型 | RMSE ↓ | MAPE ↓ | 峰度 → 4.60 | 部署 |
+|------|--------|--------|-------------|------|
+| 真实测试集 vs oracle (10k vs 100k) | 0.165 | 0.0112 | 4.603 | 参照 |
+| **Joint-FM teacher** (EMA60, NFE120) | **0.094** | **0.0095** | 4.371 | NFE120 |
+| Flow-map（朴素一步） | 0.179 | 0.0145 | 5.974 | NFE1 |
+| Pricing-aware flow-map | 0.158 | 0.0174 | 3.350 | NFE1 |
+| **On-policy flow-map** | **0.101** | 0.0110 | 4.356 | **NFE1** |
+
+完整的统一对比、三类蒸馏、定价微调、on-policy 消融见 `paper/main_zh.pdf` 表 1–5，对应的原始评测 JSON 见 [`release/results/`](release/results/)。
+
+## 目录结构
+
+```
+finflow/                 核心包
+  data/                  Heston QE 模拟 + 三区制马尔可夫切换 + 期权定价
+  models/                TransitionFM（联合/两阶段速度场）+ MeanFlow + Consistency
+  distillation/          Mean-Flow / Consistency 蒸馏器
+  pathwise_teacher.py    SIGMA 路径分布微调
+  inference/             统一采样器 + 自回归 rollout
+  eval/                  风格化事实 + 距离 + 定价 + 报告
+  baselines/             Quant-GAN（TCN + Lambert-W + WGAN-GP）
+  training.py            联合 / 两阶段训练器
+scripts/                 CLI 入口（每条命令一个脚本）
+tests/                   pytest 测试套件
+data/heston_v3/          数据集（splits + metadata + mc_oracle）
+analysis/                make_figures.py + 论文配图 + 可视化数据
+paper/                   论文源码（main_zh.tex / pdf / references.bib）
+presentation/            课程汇报（pptx / 讲稿）
+release/                 ★ 交付物：终版模型权重 + 关键实验结果
+archive/                 归档：被取代的实验、设计草稿、旧 runs（已 gitignore）
+```
+
+## 安装
 
 ```bash
-pip install numpy torch tqdm pytest scipy
+pip install -r requirements.txt   # numpy, torch, tqdm, matplotlib, pytest
+```
 
-# --- 1) data ---------------------------------------------------------------
+## 端到端流程
+
+```bash
+# 1) 数据：三区制切换 Heston + MC oracle
 python3 scripts/generate_heston_data.py \
-  --output data/heston_v3 \
-  --n-train 50000 --n-val 5000 --n-test 10000 \
+  --output data/heston_v3 --n-train 50000 --n-val 5000 --n-test 10000 \
   --steps 252 --regimes --seed 1234
-
-python3 scripts/price_heston_grid.py \
-  --output data/heston_v3/option_grid.json
-
-# --- 2) Stage 1: train the two FM teachers --------------------------------
-python3 scripts/train_vol_trans.py \
-  --data-dir data/heston_v3 --output-dir runs/vol_fm \
-  --batch-size 512 --epochs 20 --lr 3e-4 \
-  --action-dropout-prob 0.1
-
-python3 scripts/train_ret_trans.py \
-  --data-dir data/heston_v3 --output-dir runs/ret_fm \
-  --batch-size 512 --epochs 20 --lr 3e-4 \
-  --action-dropout-prob 0.1 \
-  --vol-sampler-checkpoint runs/vol_fm/<run>/checkpoints/best.pt \
-  --scheduled-sampling-max-prob 0.5
-
-# --- 3) Stage 2: 1-NFE distillation ---------------------------------------
-# Mean Flow students (recommended)
-python3 scripts/distill_mean_flow.py --stage vol \
-  --teacher-checkpoint runs/vol_fm/<run>/checkpoints/best.pt \
-  --data-dir data/heston_v3 --epochs 15 --batch-size 512 \
-  --boundary-prob-start 0.5 --boundary-prob-end 0.1 \
-  --identity-residual-eval
-
-python3 scripts/distill_mean_flow.py --stage ret \
-  --teacher-checkpoint runs/ret_fm/<run>/checkpoints/best.pt \
-  --data-dir data/heston_v3 --epochs 15 --batch-size 512 \
-  --boundary-prob-start 0.5 --boundary-prob-end 0.1 \
-  --identity-residual-eval
-
-# Consistency Distillation students (comparison baseline)
-python3 scripts/distill_consistency.py --stage vol \
-  --teacher-checkpoint runs/vol_fm/<run>/checkpoints/best.pt \
-  --data-dir data/heston_v3 --epochs 15 --curriculum-kind ict \
-  --n-min 10 --n-max 160 --huber-c 0.03
-
-python3 scripts/distill_consistency.py --stage ret \
-  --teacher-checkpoint runs/ret_fm/<run>/checkpoints/best.pt \
-  --data-dir data/heston_v3 --epochs 15 --curriculum-kind ict \
-  --n-min 10 --n-max 160 --huber-c 0.03
-
-# --- 4) autoregressive rollout --------------------------------------------
-python3 scripts/rollout.py \
-  --vol-checkpoint runs/mf_vol_distill/<run>/checkpoints/best.pt \
-  --ret-checkpoint runs/mf_ret_distill/<run>/checkpoints/best.pt \
-  --data-dir data/heston_v3 \
-  --output runs/rollout_mf.npz \
-  --n-paths 10000 --n-steps 252 --regime-actions \
-  --cfg-w 2.0
-
-# Same script also works with FM teacher or CD checkpoints (auto-detected).
-
-# Optional fair sampling-time calibration, matching Quant GAN's affine
-# mean/std correction:
-python3 scripts/rollout.py \
-  --vol-checkpoint runs/vol_fm/<run>/checkpoints/best.pt \
-  --ret-checkpoint runs/ret_fm/<run>/checkpoints/best.pt \
-  --data-dir data/heston_v3 \
-  --output runs/rollout_fm_calibrated.npz \
-  --n-paths 10000 --n-steps 252 --regime-actions \
-  --calibrate-moments
-
-# --- 5) evaluation --------------------------------------------------------
 python3 scripts/generate_mc_oracle.py \
-  --data-dir data/heston_v3 --output data/heston_v3/mc_oracle.npz \
-  --n-paths 100000
+  --data-dir data/heston_v3 --output data/heston_v3/mc_oracle.npz --n-paths 100000
 
+# 2) 主方法：训练联合转移流匹配 teacher
+python3 scripts/train_joint_trans.py \
+  --data-dir data/heston_v3 --output-dir runs/joint_fm \
+  --hidden-dim 512 --num-blocks 6 --batch-size 8192 --epochs 60 --lr 2e-4
+
+# 选择最优 EMA 检查点 / NFE（按定价 RMSE 排名）
+python3 scripts/select_joint_checkpoint.py \
+  --checkpoints "runs/joint_fm/<run>/checkpoints/ema_epoch_*.pt" \
+  --data-dir data/heston_v3 --mc-oracle data/heston_v3/mc_oracle.npz \
+  --nfe-steps 120 --rank-by pricing_rmse --regime-actions \
+  --output runs/joint_fm/selection.json
+
+# 3) 一步蒸馏：flow-map（最优起点），可对比 CD / Mean-Flow
+python3 scripts/distill_flow_map.py --stage joint \
+  --teacher-checkpoint runs/joint_fm/<run>/checkpoints/ema_epoch_060.pt \
+  --data-dir data/heston_v3 --output-dir runs/joint_distill --epochs 15 --batch-size 4096
+
+# 4) 主蒸馏：on-policy teacher-endpoint 修正（最优配置 h128/s30/e1）
+python3 scripts/finetune_flow_map_onpolicy.py \
+  --data-dir data/heston_v3 --mc-oracle data/heston_v3/mc_oracle.npz \
+  --init-checkpoint runs/joint_distill/<run>/checkpoints/best.pt \
+  --teacher-checkpoint runs/joint_fm/<run>/checkpoints/ema_epoch_060.pt \
+  --output-dir runs/joint_onpolicy \
+  --teacher-n-steps 120 --rollout-horizon 128 --path-batch-size 512 \
+  --steps-per-epoch 30 --epochs 1 --lr 5e-6 --flowmap-weight 1
+
+# 5) 评测：自由 rollout + 相对 oracle 定价
+python3 scripts/rollout_joint.py \
+  --checkpoint runs/joint_onpolicy/<run>/checkpoints/best.pt \
+  --output runs/rollout_onpolicy.npz --n-paths 10000 --n-steps 252
 python3 scripts/evaluate_rollout.py \
-  --real data/heston_v3/test.npz \
-  --fake runs/rollout_mf.npz \
-  --mc-oracle data/heston_v3/mc_oracle.npz \
-  --output runs/eval_mf.json \
-  --signature-depth 3 \
-  --moneynesses 0.85 0.9 0.95 1.0 1.05 \
-  --maturities 0.25 0.5 1.0
-
-# Regime-switching data has no single-Heston Carr-Madan reference, so this
-# command reports statistical/distance metrics and marks pricing as skipped
-# unless you pass --mc-oracle path/to/oracle.npz. Drop --regimes during data
-# generation for a closed-form Carr-Madan pricing RMSE run.
-
-# --- 6) Quant GAN baseline ------------------------------------------------
-python3 scripts/train_quant_gan.py \
-  --data-dir data/heston_v3 --output-dir runs/quant_gan \
-  --seq-len 252 --epochs 30 --d-steps-per-g 5 \
-  --gradient-penalty-weight 10 --lambert-w-delta 0.1
-
-python3 scripts/sample_quant_gan.py \
-  --checkpoint runs/quant_gan/<run>/checkpoints/best.pt \
-  --output runs/quant_gan_paths.npz --n-paths 10000
-
-python3 scripts/evaluate_rollout.py \
-  --real data/heston_v3/test.npz \
-  --fake runs/quant_gan_paths.npz \
-  --output runs/eval_quant_gan.json
-
-scripts/run_full_evaluation.sh runs data/heston_v3/test.npz runs/evaluation
+  --real data/heston_v3/test.npz --fake runs/rollout_onpolicy.npz \
+  --mc-oracle data/heston_v3/mc_oracle.npz --output runs/eval_onpolicy.json \
+  --moneynesses 0.85 0.9 0.95 1.0 1.05 --maturities 0.25 0.5 1.0
 ```
 
-## Teacher Tuning
+> **raw / cal 两种口径**：`scripts/rollout_calibration.py` 可在生成器输出上施加一次仿射矩校准（与 Quant-GAN 一致），用于报告 `cal` 口径；joint-FM 与 on-policy flow-map 的 raw 口径无需校准即达 0.094 / 0.101。
 
-The current teacher-improvement path is intentionally additive: it does not
-remove or overwrite prior result-generation code.
+## 交付的权重与结果
+
+见 [`release/README.md`](release/README.md)。`release/checkpoints/` 含 13 个一步学生检查点（flow-map / CD / Mean-Flow / on-policy×7 / pricing×3），`release/results/` 含对应的原始评测 JSON。
+
+> **注意**：joint-FM teacher 的权重（`ema_epoch_060.pt`）与 Quant-GAN 检查点在当前本地副本中缺失（仅存 `config.json` / `summary.json`），需用上面的训练命令重新生成；其评测结果 JSON 与配置已完整保留在 `release/`。
+
+## 配图复现
 
 ```bash
-# Reproduce / extend the Lambert-W variance-kernel sweep used for eval_lwfm/.
-# This trains only new vol kernels and reuses the selected return teacher.
-DELTAS="0.03 0.05 0.08 0.12" \
-  bash scripts/lwfm_vol_sweep.sh runs/experiments/p3_full_parallel
-
-# Next experimental step: start from the best LWFM teacher and fine-tune with a
-# whole-path TCN critic, borrowing Quant GAN's sequence-level objective while
-# keeping the two-stage FM structure.
-DELTA=0.05 EPOCHS=3 STEPS_PER_EPOCH=100 \
-  bash scripts/run_pathwise_teacher.sh runs/experiments/p3_full_parallel
+python3 analysis/make_figures.py     # 读取 analysis/viz_data/，输出到 analysis/figures/
 ```
 
-The pathwise run writes to `training/pathwise_teacher/` and
-`eval_pathwise/`. It leaves `eval_lwfm/`, `eval_champion/`, and
-`eval_calibrated/` untouched.
-
-`num_actions` is auto-read from `metadata.json` at every step. Drop `--regimes`
-on data generation to use a single fixed parameter set; everything downstream
-adapts automatically.
-
-## Outputs
-
-`generate_heston_data.py` writes per split:
-
-- `{split}.npz`: full simulated paths (`s_paths`, `v_paths`, `log_returns`,
-  plus `actions` when `--regimes` is set)
-- `{split}_transitions.npz`: flattened one-step transitions
-  (`v_t`, `r_t`, `v_next`, `r_next`, `log_v_t`, `log_v_next`, optional
-  `action`)
-- `metadata.json`: Heston params, regime config, normalization stats,
-  `num_actions`, and the canonical transition alignment
-  `(v_t, r_{t-1}, a_t) -> (v_{t+1}, r_t)`
-
-Every training / distillation script writes `runs/<stage>/<run_name>/`:
-
-- `config.json` — full run config snapshot
-- `metrics.jsonl` — per-epoch loss + epoch wall-clock
-- `checkpoints/best.pt`, `checkpoints/last.pt`
-- `summary.json` — pointer to checkpoints + history + total wall-clock
-- live progress bar with running loss + per-epoch summary line (auto-throttled
-  in non-TTY logs)
-
-Checkpoints carry `stage`, `num_actions`, and `extra.kind` so the inference
-loader (`load_sampler_from_checkpoint`) auto-dispatches the right sampler
-(FM teacher / Mean Flow / Consistency).
-
-## Tests
+## 测试
 
 ```bash
 python3 -m pytest tests/
 ```
 
-Covers: Heston QE shape / positivity, regime simulation, MC-oracle generation,
-Carr-Madan accuracy
-(low-vol-of-vol → BS limit + monotonicity + ATM Heston), V3 vol/ret datasets,
-single-stage + two-stage FM trainers, Mean Flow model + JVP-based loss +
-distillation smoke, Consistency model + distillation smoke, all three samplers,
-CFG rollout, autoregressive rollout, the 5 stylized facts, Wasserstein and
-signature distances, MC pricing vs Carr-Madan / MC oracle, and Quant GAN
-forward + train + sample.
-
-## Status
-
-All V3 components defined in
-[idea/2/04_v3_implementation.md](idea/2/04_v3_implementation.md) are implemented:
-data + Carr-Madan, Stage 1 teachers, Mean Flow + Consistency distillation,
-unified samplers + autoregressive rollout, the full evaluation suite, and a
-Quant GAN baseline. P1 methodology hooks are also implemented: Mean Flow
-boundary curriculum, ret-stage scheduled sampling, classifier-free guidance,
-and Sig-Wasserstein reporting. Pending V3 future work: longer empirical
-sweeps, per-regime reporting, visualizations, and writeup polish.
+覆盖：Heston QE 形状/正性、区制模拟、MC-oracle 生成、期权定价、两阶段/联合 FM 训练器、Mean-Flow / Consistency / flow-map 蒸馏、采样器、自回归 rollout、5 项风格化事实、Wasserstein 与签名距离、Quant-GAN、on-policy 与 pricing 微调。

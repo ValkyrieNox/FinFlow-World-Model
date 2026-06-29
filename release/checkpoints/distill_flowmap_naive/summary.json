@@ -1,0 +1,9 @@
+{
+  "run_dir": "runs/experiments/p3_full_parallel/training/joint_distill_0615/flowmap/joint_flowmap_ema060_bs4096_e15_0615",
+  "best_val_loss": 0.00026131937888170046,
+  "checkpoints": {
+    "best": "runs/experiments/p3_full_parallel/training/joint_distill_0615/flowmap/joint_flowmap_ema060_bs4096_e15_0615/checkpoints/best.pt",
+    "last": "runs/experiments/p3_full_parallel/training/joint_distill_0615/flowmap/joint_flowmap_ema060_bs4096_e15_0615/checkpoints/last.pt"
+  },
+  "total_time_s": 1107.7827117014676
+}

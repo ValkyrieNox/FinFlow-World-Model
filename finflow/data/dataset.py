@@ -155,7 +155,9 @@ class HestonJointTransitionDataset(Dataset[dict[str, torch.Tensor]]):
     """Action-aware joint transition kernel.
 
     condition: ``[log_v_t_norm, r_t_norm, a_t_onehot]`` of size
-               ``2 + num_actions``
+               ``2 + num_actions`` by default. Set ``include_prev_return=False``
+               for the Markov-minimal ablation
+               ``[log_v_t_norm, a_t_onehot]``.
     target:    ``[log_v_next_norm, r_next_norm]`` of size ``2``
     """
 
@@ -169,6 +171,7 @@ class HestonJointTransitionDataset(Dataset[dict[str, torch.Tensor]]):
         return_std: float = 1.0,
         num_actions: int = 1,
         action_dropout_prob: float = 0.0,
+        include_prev_return: bool = True,
     ) -> None:
         self.path = Path(path)
         self.normalize = normalize
@@ -178,6 +181,7 @@ class HestonJointTransitionDataset(Dataset[dict[str, torch.Tensor]]):
         self.return_std = float(return_std)
         self.num_actions = int(num_actions)
         self.action_dropout_prob = _validate_action_dropout_prob(action_dropout_prob)
+        self.include_prev_return = bool(include_prev_return)
         if self.log_v_std <= 0 or self.return_std <= 0:
             raise ValueError("normalization std values must be positive")
         if self.num_actions <= 0:
@@ -193,11 +197,17 @@ class HestonJointTransitionDataset(Dataset[dict[str, torch.Tensor]]):
         self.log_v_next = np.asarray(npz["log_v_next"], dtype=np.float32)
         self.r_next = np.asarray(npz["r_next"], dtype=np.float32)
         self.action = _load_action_array(list(npz.files), npz, self.log_v_t.shape[0])
+        # step_index (if present) marks position within each path. Transitions are
+        # flattened path-major, so row i's autoregressive parent is row i-1 exactly
+        # when step_index[i] > 0. Used for self-scheduled-sampling parent linkage.
+        self.step_index = (
+            np.asarray(npz["step_index"]) if "step_index" in npz.files else None
+        )
         npz.close()
 
     @property
     def condition_dim(self) -> int:
-        return 2 + self.num_actions
+        return (2 if self.include_prev_return else 1) + self.num_actions
 
     @property
     def state_dim(self) -> int:
@@ -220,7 +230,12 @@ class HestonJointTransitionDataset(Dataset[dict[str, torch.Tensor]]):
             r_next = (r_next - self.return_mean) / self.return_std
 
         a_onehot = _maybe_drop_action(_one_hot(action, self.num_actions), self.action_dropout_prob)
-        condition = torch.cat([torch.tensor([log_v_t, r_t], dtype=torch.float32), a_onehot])
+        state_condition = (
+            torch.tensor([log_v_t, r_t], dtype=torch.float32)
+            if self.include_prev_return
+            else torch.tensor([log_v_t], dtype=torch.float32)
+        )
+        condition = torch.cat([state_condition, a_onehot])
         target = torch.tensor([log_v_next, r_next], dtype=torch.float32)
         return {
             "condition": condition,
@@ -245,15 +260,12 @@ class HestonJointTransitionDataset(Dataset[dict[str, torch.Tensor]]):
             r_t = (r_t - self.return_mean) / self.return_std
             r_next = (r_next - self.return_mean) / self.return_std
 
+        state_columns = [np.asarray(log_v_t, dtype=np.float32)]
+        if self.include_prev_return:
+            state_columns.append(np.asarray(r_t, dtype=np.float32))
         condition = np.concatenate(
             [
-                np.stack(
-                    [
-                        np.asarray(log_v_t, dtype=np.float32),
-                        np.asarray(r_t, dtype=np.float32),
-                    ],
-                    axis=1,
-                ),
+                np.stack(state_columns, axis=1),
                 _one_hot_matrix(self.action, self.num_actions),
             ],
             axis=1,
@@ -265,12 +277,29 @@ class HestonJointTransitionDataset(Dataset[dict[str, torch.Tensor]]):
             ],
             axis=1,
         )
-        return {
+        tensors: dict[str, object] = {
             "condition": torch.from_numpy(np.ascontiguousarray(condition)),
             "target": torch.from_numpy(np.ascontiguousarray(target)),
-            "action_start": 2,
+            "action_start": 2 if self.include_prev_return else 1,
             "action_dropout_prob": self.action_dropout_prob,
         }
+        # Parent linkage for self-scheduled-sampling: parent_condition[i] is the
+        # condition that produced row i's carried state. Because transitions are
+        # flattened path-major, that is simply condition[i - 1] whenever row i is
+        # not the first step of its path. has_parent masks path boundaries.
+        if self.step_index is not None:
+            has_parent = np.asarray(self.step_index) > 0
+            parent_condition = np.empty_like(condition)
+            parent_condition[1:] = condition[:-1]
+            parent_condition[0] = condition[0]
+            parent_condition[~has_parent] = condition[~has_parent]
+            tensors["parent_condition"] = torch.from_numpy(
+                np.ascontiguousarray(parent_condition)
+            )
+            tensors["has_parent"] = torch.from_numpy(
+                np.ascontiguousarray(has_parent.astype(np.bool_))
+            )
+        return tensors
 
 
 class HestonVolTransitionDataset(Dataset[dict[str, torch.Tensor]]):

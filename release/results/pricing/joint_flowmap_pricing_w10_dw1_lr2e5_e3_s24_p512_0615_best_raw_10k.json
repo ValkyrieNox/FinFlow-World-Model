@@ -1,0 +1,25 @@
+{
+  "output": "runs/experiments/p3_full_parallel/eval_joint_pricing_flowmap_0615/joint_flowmap_pricing_w10_dw1_lr2e5_e3_s24_p512_0615_best_raw_10k.npz",
+  "n_paths": 10000,
+  "n_steps": 252,
+  "num_actions": 3,
+  "checkpoint": "runs/experiments/p3_full_parallel/training/joint_pricing_flowmap_0615/joint_flowmap_pricing_w10_dw1_lr2e5_e3_s24_p512_0615/checkpoints/best.pt",
+  "kind": "mf",
+  "transition_type": "unknown",
+  "include_prev_return": true,
+  "initial_v": 0.04,
+  "initial_s": 100.0,
+  "normalization": {
+    "log_v_mean": -3.3005776405334473,
+    "log_v_std": 0.7750805616378784,
+    "return_mean": 7.696966349612921e-05,
+    "return_std": 0.013751840218901634
+  },
+  "regime_actions": true,
+  "constant_action": false,
+  "cfg_w": 0.0,
+  "fm_n_steps": 20,
+  "fm_solver": "euler",
+  "calibrate_moments": false,
+  "calibration": {}
+}

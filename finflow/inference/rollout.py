@@ -7,6 +7,9 @@ denormalized paths. The alignment matches
 
     condition_t = (log_v_t_norm, r_{t-1}_norm, a_t)
     target_t    = (log_v_{t+1}_norm, r_t_norm)
+
+The action-aware joint sampler also supports the Markov-minimal ablation
+``condition_t = (log_v_t_norm, a_t)``.
 """
 
 from __future__ import annotations
@@ -228,7 +231,8 @@ def joint_autoregressive_rollout(
     """Roll out paths from an action-aware joint transition sampler.
 
     The sampler must emit ``[log_v_next_norm, r_next_norm]`` from condition
-    ``[log_v_t_norm, r_t_norm, action_onehot]``.
+    ``[log_v_t_norm, r_t_norm, action_onehot]`` or, for the Markov-minimal
+    ablation, ``[log_v_t_norm, action_onehot]``.
     """
 
     if n_paths <= 0 or n_steps <= 0:
@@ -237,11 +241,17 @@ def joint_autoregressive_rollout(
         raise ValueError("num_actions must be positive")
     if joint_sampler.state_dim != 2:
         raise ValueError("joint sampler must have state_dim=2")
-    expected_cond = 2 + num_actions
-    if joint_sampler.condition_dim != expected_cond:
+    full_condition_dim = 2 + num_actions
+    markov_minimal_condition_dim = 1 + num_actions
+    if joint_sampler.condition_dim == full_condition_dim:
+        include_prev_return = True
+    elif joint_sampler.condition_dim == markov_minimal_condition_dim:
+        include_prev_return = False
+    else:
         raise ValueError(
             f"joint sampler condition_dim {joint_sampler.condition_dim} != "
-            f"2 + num_actions = {expected_cond}"
+            f"{full_condition_dim} (full) or {markov_minimal_condition_dim} "
+            "(Markov-minimal)"
         )
     if initial_v <= 0:
         raise ValueError("initial_v must be positive")
@@ -285,7 +295,11 @@ def joint_autoregressive_rollout(
         a_step = actions_t[:, step]
         a_onehot = _onehot(a_step, num_actions).to(dtype=dtype)
 
-        condition = torch.cat([log_v_t, r_prev_t, a_onehot], dim=-1)
+        condition_parts = [log_v_t]
+        if include_prev_return:
+            condition_parts.append(r_prev_t)
+        condition_parts.append(a_onehot)
+        condition = torch.cat(condition_parts, dim=-1)
         z = torch.randn(n_paths, 2, generator=rng, dtype=dtype).to(device)
         next_state = joint_sampler.sample(condition, noise=z, cfg_w=cfg_w)
         log_v_next = next_state[:, 0:1]

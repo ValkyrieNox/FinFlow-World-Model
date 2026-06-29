@@ -14,12 +14,16 @@ from finflow.distillation import (
     mean_flow_loss_components,
     train_mean_flow_distill,
 )
+from finflow.inference import load_sampler_from_checkpoint
 from finflow.models import MeanFlowStudent, TransitionFM
 from finflow.training import (
     TransitionFMTrainConfig,
     TwoStageFMModelConfig,
+    load_checkpoint,
+    train_joint_trans_fm,
     train_vol_trans_fm,
 )
+from scripts.distill_flow_map import flow_map_loss
 
 
 def test_mean_flow_loss_runs_and_is_scalar():
@@ -87,6 +91,21 @@ def test_mean_flow_loss_components_split_boundary_and_identity():
     assert torch.isclose(identity["loss"], identity["identity_loss"])
 
 
+def test_joint_flow_map_loss_runs_and_is_scalar():
+    torch.manual_seed(0)
+    teacher = TransitionFM(state_dim=2, condition_dim=5, hidden_dim=16, time_embedding_dim=8, num_blocks=2)
+    student = MeanFlowStudent(state_dim=2, condition_dim=5, hidden_dim=16, time_embedding_dim=8, num_blocks=2)
+    for p in teacher.parameters():
+        p.requires_grad_(False)
+    cond = torch.randn(8, 5)
+    target = torch.randn(8, 2)
+    loss = flow_map_loss(student, teacher, cond, target, time_eps=1e-3, boundary_prob=0.25)
+    assert loss.ndim == 0
+    assert torch.isfinite(loss)
+    loss.backward()
+    assert any(p.grad is not None and torch.isfinite(p.grad).all() for p in student.parameters())
+
+
 def _generate_smoke_data(tmp_path: Path):
     data_dir = tmp_path / "data"
     metadata = generate_heston_dataset(
@@ -143,3 +162,46 @@ def test_train_mean_flow_distill_smoke(tmp_path: Path):
     metrics_path = Path(distill_summary["run_dir"]) / "metrics.jsonl"
     records = [json.loads(line) for line in metrics_path.read_text(encoding="utf-8").splitlines()]
     assert records[-1]["boundary_prob"] == 0.1
+
+
+def test_train_joint_mean_flow_distill_smoke(tmp_path: Path):
+    data_dir, num_actions = _generate_smoke_data(tmp_path)
+    teacher_summary = train_joint_trans_fm(
+        data_dir=data_dir,
+        output_dir=tmp_path / "runs_joint",
+        run_name="joint_teacher",
+        num_actions=num_actions,
+        model_config=TwoStageFMModelConfig(
+            state_dim=2, condition_dim=2 + num_actions,
+            hidden_dim=16, time_embedding_dim=8, num_blocks=2,
+        ),
+        train_config=TransitionFMTrainConfig(
+            batch_size=4, epochs=1, lr=1e-3, weight_decay=0.0, grad_clip_norm=1.0,
+            seed=17, device="cpu", max_train_batches=2, max_val_batches=1, progress=False,
+        ),
+    )
+    distill_summary = train_mean_flow_distill(
+        data_dir=data_dir,
+        output_dir=tmp_path / "runs_mf_joint",
+        stage="joint",
+        run_name="mf_joint_smoke",
+        distill_config=MeanFlowDistillConfig(
+            teacher_checkpoint=teacher_summary["checkpoints"]["best"],
+            batch_size=4, epochs=1, lr=1e-3, weight_decay=0.0,
+            seed=18, device="cpu", max_train_batches=2, max_val_batches=1,
+            boundary_prob_start=0.5, boundary_prob_end=0.5, progress=False,
+        ),
+        student_config=TwoStageFMModelConfig(
+            state_dim=2, condition_dim=2 + num_actions,
+            hidden_dim=16, time_embedding_dim=8, num_blocks=2,
+        ),
+    )
+    ckpt_path = Path(distill_summary["checkpoints"]["best"])
+    assert ckpt_path.exists()
+    ckpt = load_checkpoint(ckpt_path, map_location="cpu")
+    assert ckpt["stage"] == "mf_joint"
+    assert ckpt["model_config"]["state_dim"] == 2
+    loaded = load_sampler_from_checkpoint(ckpt_path, device="cpu")
+    assert loaded.stage == "joint"
+    assert loaded.sampler.state_dim == 2
+    assert loaded.sampler.condition_dim == 2 + num_actions

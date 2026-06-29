@@ -7,7 +7,8 @@ Two public entry families:
 
 2. Action-aware joint model:
    ``train_joint_trans_fm`` learns
-   ``p(log_v_next, r_next | log_v_t, r_t, action)`` in one FM teacher.
+   ``p(log_v_next, r_next | log_v_t, r_t, action)`` in one FM teacher, or the
+   Markov-minimal ablation ``p(log_v_next, r_next | log_v_t, action)``.
 
 3. V3 two-stage models:
    - Stage 1a (variance kernel): ``train_vol_trans_fm``
@@ -40,6 +41,7 @@ from finflow.data import (
     HestonVolTransitionDataset,
 )
 from finflow.models import TransitionFM, conditional_flow_matching_loss
+from finflow.models.transition_fm import euler_sample
 
 
 # ---------------------------------------------------------------------------
@@ -159,6 +161,8 @@ class TensorBatchLoader:
         device: torch.device,
         action_start: int | None = None,
         action_dropout_prob: float = 0.0,
+        parent_condition: torch.Tensor | None = None,
+        has_parent: torch.Tensor | None = None,
     ) -> None:
         if condition.shape[0] != target.shape[0]:
             raise ValueError("condition and target must have the same length")
@@ -171,6 +175,14 @@ class TensorBatchLoader:
         self.device = device
         self.action_start = action_start
         self.action_dropout_prob = float(action_dropout_prob)
+        if parent_condition is not None:
+            if parent_condition.shape != condition.shape:
+                raise ValueError("parent_condition must match condition shape")
+            parent_condition = parent_condition.to(device, non_blocking=True).contiguous()
+        if has_parent is not None:
+            has_parent = has_parent.to(device, non_blocking=True).reshape(-1, 1).contiguous()
+        self.parent_condition = parent_condition
+        self.has_parent = has_parent
 
     def __len__(self) -> int:
         n = int(self.condition.shape[0])
@@ -182,15 +194,21 @@ class TensorBatchLoader:
             order = torch.randperm(n, device=self.device)
             for start in range(0, n, self.batch_size):
                 idx = order[start:start + self.batch_size]
-                condition = self.condition.index_select(0, idx)
-                target = self.target.index_select(0, idx)
-                yield self._make_batch(condition, target)
+                yield self._make_batch(idx=idx)
         else:
             for start in range(0, n, self.batch_size):
                 end = min(start + self.batch_size, n)
-                yield self._make_batch(self.condition[start:end], self.target[start:end])
+                idx = slice(start, end)
+                yield self._make_batch(idx=idx)
 
-    def _make_batch(self, condition: torch.Tensor, target: torch.Tensor) -> dict[str, torch.Tensor]:
+    def _select(self, tensor: torch.Tensor, idx) -> torch.Tensor:
+        if isinstance(idx, slice):
+            return tensor[idx]
+        return tensor.index_select(0, idx)
+
+    def _make_batch(self, idx) -> dict[str, torch.Tensor]:
+        condition = self._select(self.condition, idx)
+        target = self._select(self.target, idx)
         if self.action_start is not None and self.action_dropout_prob > 0.0:
             condition = condition.clone()
             keep = (
@@ -198,7 +216,12 @@ class TensorBatchLoader:
                 >= self.action_dropout_prob
             ).to(dtype=condition.dtype)
             condition[:, self.action_start:] *= keep
-        return {"condition": condition, "target": target}
+        batch = {"condition": condition, "target": target}
+        if self.parent_condition is not None:
+            batch["parent_condition"] = self._select(self.parent_condition, idx)
+        if self.has_parent is not None:
+            batch["has_parent"] = self._select(self.has_parent, idx)
+        return batch
 
 
 def build_dataloader(
@@ -240,6 +263,8 @@ def build_batch_loader(
             device=device,
             action_start=tensors.get("action_start"),
             action_dropout_prob=float(tensors.get("action_dropout_prob", 0.0)),
+            parent_condition=tensors.get("parent_condition"),
+            has_parent=tensors.get("has_parent"),
         )
 
     return DataLoader(
@@ -495,6 +520,7 @@ def _run_fm_training(
         Callable[[int], tuple[Callable[[dict[str, torch.Tensor], torch.Tensor], torch.Tensor] | None, dict[str, Any]]]
         | None
     ) = None,
+    joint_self_scheduled_sampling: bool = False,
 ) -> dict[str, Any]:
     device = resolve_device(train_config.device)
     model = model.to(device)
@@ -567,6 +593,68 @@ def _run_fm_training(
         print(header, file=sys.stderr, flush=True)
 
     run_start = time.monotonic()
+
+    if joint_self_scheduled_sampling and train_config.scheduled_sampling_max_prob > 0.0:
+        # Self-scheduled-sampling for the joint kernel: with a ramped probability
+        # replace a row's carried state (log_v_t[, r_{t-1}]) with the model's own
+        # one-step sample drawn from that row's autoregressive parent condition.
+        # This exposes the kernel to its own marginal at train time, closing the
+        # teacher-forcing / free-rollout gap that drives raw error accumulation.
+        ss_state_cols = model.condition_dim - num_actions
+        ss_fm_steps = max(int(train_config.scheduled_sampling_fm_steps), 1)
+
+        def _joint_ss_factory(epoch: int):
+            prob = _scheduled_sampling_prob_for_epoch(
+                epoch, train_config.epochs,
+                train_config.scheduled_sampling_max_prob,
+                train_config.scheduled_sampling_start_epoch,
+            )
+            base_extra = {
+                "scheduled_sampling_prob": prob,
+                "scheduled_sampling_mode": "joint_self",
+                "scheduled_sampling_fm_steps": ss_fm_steps,
+            }
+            if prob <= 0.0:
+                return None, base_extra
+            # Prefer the EMA weights as a stable target-network sampler; sync once
+            # per epoch (cheap) rather than per batch.
+            if ema_enabled and ema_state is not None and ema_model is not None:
+                ema_model.load_state_dict(ema_state)
+                sampler_model = ema_model
+            else:
+                sampler_model = model
+
+            def transform(
+                batch: dict[str, torch.Tensor],
+                condition: torch.Tensor,
+            ) -> torch.Tensor:
+                parent = batch.get("parent_condition")
+                if parent is None:
+                    return condition
+                has_parent = batch.get("has_parent")
+                was_training = sampler_model.training
+                sampler_model.eval()
+                with torch.no_grad():
+                    sampled = euler_sample(
+                        sampler_model,
+                        parent.to(device=condition.device, dtype=condition.dtype),
+                        n_steps=ss_fm_steps,
+                    )
+                if was_training:
+                    sampler_model.train()
+                mask = torch.rand(condition.shape[0], 1, device=condition.device) < prob
+                if has_parent is not None:
+                    mask = mask & has_parent.to(device=condition.device, dtype=torch.bool)
+                updated = condition.clone()
+                updated[:, :ss_state_cols] = torch.where(
+                    mask, sampled[:, :ss_state_cols].to(condition.dtype),
+                    updated[:, :ss_state_cols],
+                )
+                return updated
+
+            return transform, base_extra
+
+        train_condition_transform_factory = _joint_ss_factory
 
     for epoch in range(1, train_config.epochs + 1):
         epoch_start = time.monotonic()
@@ -834,6 +922,7 @@ def build_joint_datasets(
     normalization: dict[str, float],
     num_actions: int,
     train_action_dropout_prob: float = 0.0,
+    include_prev_return: bool = True,
 ) -> dict[str, HestonJointTransitionDataset]:
     data_dir = Path(data_dir)
     return {
@@ -846,6 +935,7 @@ def build_joint_datasets(
             return_std=normalization["return_std"],
             num_actions=num_actions,
             action_dropout_prob=train_action_dropout_prob if split == "train" else 0.0,
+            include_prev_return=include_prev_return,
         )
         for split in ("train", "val", "test")
     }
@@ -858,13 +948,16 @@ def train_joint_trans_fm(
     num_actions: int | None = None,
     model_config: TwoStageFMModelConfig | None = None,
     train_config: TransitionFMTrainConfig | None = None,
+    include_prev_return: bool = True,
 ) -> dict[str, Any]:
     """Train an action-aware joint FM.
 
     The model samples ``[log_v_next_norm, r_next_norm]`` jointly from
-    ``[log_v_t_norm, r_t_norm, action_onehot]``. This keeps the immediate
-    return/volatility dependence inside one teacher instead of splitting it
-    across Stage 1a/1b.
+    ``[log_v_t_norm, r_t_norm, action_onehot]`` by default. With
+    ``include_prev_return=False`` it runs the Markov-minimal ablation and
+    samples from ``[log_v_t_norm, action_onehot]``. The joint target keeps the
+    immediate return/volatility dependence inside one teacher instead of
+    splitting it across Stage 1a/1b.
     """
 
     train_config = train_config or TransitionFMTrainConfig()
@@ -873,30 +966,39 @@ def train_joint_trans_fm(
     if num_actions is None:
         num_actions = load_num_actions(data_dir)
     normalization = load_normalization(data_dir)
+    include_prev_return = bool(include_prev_return)
     datasets = build_joint_datasets(
         data_dir, normalization, num_actions,
         train_action_dropout_prob=train_config.action_dropout_prob,
+        include_prev_return=include_prev_return,
     )
 
+    condition_fields = (
+        ["log_v_t", "r_prev", "action"]
+        if include_prev_return
+        else ["log_v_t", "action"]
+    )
+    expected = (2 if include_prev_return else 1) + num_actions
     if model_config is None:
         model_config = TwoStageFMModelConfig(
-            state_dim=2, condition_dim=2 + num_actions,
+            state_dim=2, condition_dim=expected,
         )
     else:
-        expected = 2 + num_actions
         if model_config.state_dim != 2:
             raise ValueError("joint-stage model_config.state_dim must be 2")
         if model_config.condition_dim != expected:
             raise ValueError(
-                f"joint-stage condition_dim must be 2 + num_actions = {expected},"
+                f"joint-stage condition_dim must be {expected},"
                 f" got {model_config.condition_dim}"
             )
 
+    self_scheduled_sampling = train_config.scheduled_sampling_max_prob > 0.0
     transition_extra = {
         "kind": "fm",
-        "transition_type": "joint_vr",
-        "condition": ["log_v_t", "r_t", "action"],
+        "transition_type": "joint_vr" if include_prev_return else "joint_vr_markov_minimal",
+        "condition": condition_fields,
         "target": ["log_v_next", "r_next"],
+        "include_prev_return": include_prev_return,
     }
     run_dir = build_run_dir(output_dir, run_name=run_name, prefix="joint_trans_fm")
     model = TransitionFM(**asdict(model_config))
@@ -911,9 +1013,11 @@ def train_joint_trans_fm(
         num_actions=num_actions,
         config_blob_extra={
             "data_dir": str(Path(data_dir).resolve()),
+            "self_scheduled_sampling": self_scheduled_sampling,
             **transition_extra,
         },
         checkpoint_extra=transition_extra,
+        joint_self_scheduled_sampling=self_scheduled_sampling,
     )
 
 

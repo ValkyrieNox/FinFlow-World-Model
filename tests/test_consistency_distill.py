@@ -14,10 +14,13 @@ from finflow.distillation import (
 )
 from finflow.distillation.consistency import _schedule
 from finflow.distillation.consistency import _curriculum_ema_decay, _curriculum_n
+from finflow.inference import load_sampler_from_checkpoint
 from finflow.models import ConsistencyStudent, TransitionFM
 from finflow.training import (
     TransitionFMTrainConfig,
     TwoStageFMModelConfig,
+    load_checkpoint,
+    train_joint_trans_fm,
     train_ret_trans_fm,
 )
 
@@ -133,3 +136,48 @@ def test_train_consistency_distill_smoke(tmp_path: Path):
     assert ckpt["extra"]["model_state_kind"] == "ema"
     assert distill_summary["stage"] == "cd_ret"
     assert distill_summary["num_actions"] == num_actions
+
+
+def test_train_joint_consistency_distill_smoke(tmp_path: Path):
+    data_dir, num_actions = _generate_smoke_data(tmp_path)
+    teacher_summary = train_joint_trans_fm(
+        data_dir=data_dir,
+        output_dir=tmp_path / "runs_joint",
+        run_name="joint_teacher",
+        num_actions=num_actions,
+        model_config=TwoStageFMModelConfig(
+            state_dim=2, condition_dim=2 + num_actions,
+            hidden_dim=16, time_embedding_dim=8, num_blocks=2,
+        ),
+        train_config=TransitionFMTrainConfig(
+            batch_size=4, epochs=1, lr=1e-3, weight_decay=0.0, grad_clip_norm=1.0,
+            seed=19, device="cpu", max_train_batches=2, max_val_batches=1, progress=False,
+        ),
+    )
+    distill_summary = train_consistency_distill(
+        data_dir=data_dir,
+        output_dir=tmp_path / "runs_cd_joint",
+        stage="joint",
+        run_name="cd_joint_smoke",
+        distill_config=ConsistencyDistillConfig(
+            teacher_checkpoint=teacher_summary["checkpoints"]["best"],
+            batch_size=4, epochs=1, lr=1e-3, weight_decay=0.0,
+            seed=20, device="cpu", max_train_batches=2, max_val_batches=1,
+            n_discretization=4, ema_decay=0.9, curriculum_kind="fixed",
+            progress=False,
+        ),
+        student_config=TwoStageFMModelConfig(
+            state_dim=2, condition_dim=2 + num_actions,
+            hidden_dim=16, time_embedding_dim=8, num_blocks=2,
+        ),
+    )
+    ckpt_path = Path(distill_summary["checkpoints"]["best"])
+    assert ckpt_path.exists()
+    ckpt = load_checkpoint(ckpt_path, map_location="cpu")
+    assert ckpt["stage"] == "cd_joint"
+    assert ckpt["extra"]["model_state_kind"] == "ema"
+    assert ckpt["model_config"]["state_dim"] == 2
+    loaded = load_sampler_from_checkpoint(ckpt_path, device="cpu")
+    assert loaded.stage == "joint"
+    assert loaded.sampler.state_dim == 2
+    assert loaded.sampler.condition_dim == 2 + num_actions

@@ -17,13 +17,13 @@
 \newcommand{\raw}{\textsc{raw}}
 \renewcommand{\cal}{\textsc{cal}}
 \newcommand{\best}[1]{\textbf{#1}}
-\newcommand{\vt}{v_t}
 \newcommand{\E}{\mathbb{E}}
 \newcommand{\R}{\mathbb{R}}
-\DeclareMathOperator*{\argmin}{arg\,min}
+\newcommand{\vt}{v_t}
+\newcommand{\nfe}{\mathrm{NFE}}
 
-\title{\bfseries SIGMA：面向区制切换 Heston 市场的可控流匹配世界模型\\
-——以严格恰当（签名--能量）路径分布训练，并经少步蒸馏的校准期权定价}
+\title{\bfseries 面向区制切换市场的动作条件流匹配世界模型：\\
+从两阶段到联合转移流匹配，及一步 on-policy flow-map 蒸馏}
 
 \author{FinFlow 课题组}
 \date{课程：基于深度学习的内容生成原理与方法}
@@ -32,400 +32,338 @@
 \maketitle
 
 \begin{abstract}
-我们研究面向合成金融市场的生成式\textbf{世界模型}（world model，即一个可被外部智能体的动作驱动、并能自回归推演环境动态的可学习模拟器）。我们要解决的不是"再画一张像收益曲线的图"，而是构造一个同时满足两个苛刻条件的\emph{市场模拟器}：
-（i）\textbf{可控}——它以一个外部智能体在每一步设定的潜在市场\emph{区制}（正常/高波动/崩盘）为条件，从而能被"驱动"进入指定情景；
-（ii）\textbf{自洽}——它在\emph{自由演化}（free-running）地自回归展开整整一年（252 步）时不发散、不漂移，而不是仅在单步教师强制（teacher forcing）下看起来正确。
-为获得可信的"地面真值"，我们以三区制马尔可夫切换 Heston 过程合成数据，并用一个独立的十万条蒙特卡洛（MC）路径作为期权定价\emph{预言机}（oracle）——这是合成市场相对真实市场的关键优势：真值可知。
-在此之上，我们构建一个两阶段、动作条件的\textbf{流匹配}（Flow Matching, FM）世界模型（先方差、后收益），并提出两项贡献。
-第一，一种\textbf{严格恰当（strictly-proper）的路径分布微调}：它在一个\emph{可微的自由演化 rollout} 上，用签名核 MMD、Sig-W$_1$ 期望签名与能量分数（energy score）的组合，替代 Quant-GAN 的对抗式 WGAN-GP 判别器，把校准后定价误差从 $0.583$（基础 teacher）经 $0.420$（对抗判别器）单调改进到 $\best{0.180}$。
-第二，一项系统的少步\textbf{蒸馏}研究，并给出一个一致的机理解释：为什么"teacher + 一致性蒸馏"会在\emph{校准定价}这一指标上\emph{超过 teacher 本身}，而一致性之外的 Mean-Flow 直接失败、flow-map 也不及一致性蒸馏。
-贯穿训练与蒸馏的全部模型，我们提炼出一个稳健的 \textbf{raw$\leftrightarrow$校准权衡}，并把任何低于预言机地板的校准数值识别并标注为校准\emph{假象}（artifact）。我们公开全部代码与协议。
+本文研究一类金融世界模型：它由外部智能体选择的离散市场区制驱动，并在不使用教师强制的前提下自回归推演一整个交易年。与仅追求收益直方图逼真的金融生成模型不同，世界模型需同时满足可控、自洽与金融保真三项要求；本文以三区制马尔可夫切换 Heston 过程作为可控合成市场，以独立 $100$k 条蒙特卡洛（MC）路径给出的期权价格作为评测 oracle，并在自由 rollout 下以生成路径上欧式期权价格相对 oracle 的 RMSE 作为主指标。本文沿一条递进的路线构造方法：在经典计量与 GAN 基线之上，第一步以两阶段转移流匹配把单步转移分解为方差与收益两个条件流匹配阶段，并辅以调度采样，已显著优于 GARCH 与 Quant-GAN；进一步指出该分解会在自回归推演中传播条件误差，遂提出作为主方法的联合转移流匹配（joint-FM），将下一方差与下一收益作为联合变量一次性建模，在 Euler $\nfe{=}120$ 下取得未校准定价 RMSE $0.094$。为获得可部署的一步采样器，本文提出 on-policy 端点蒸馏：令一步 flow-map 学生在其自身 rollout 访问到的状态分布上匹配冻结 teacher 的端点，将一步模型的 RMSE 由 $0.179$ 降至 $0.101$，逼近多步 teacher，同时改善终端收益分布与杠杆相关。本文进一步系统比较了严格正常评分的路径分布微调、可微定价微调，以及一致性蒸馏与 Mean-Flow 等一步蒸馏族，并指出：单纯压低校准后定价误差并不足以保证原始路径质量，而对学生 rollout 状态分布做端点蒸馏，才是兼顾保真与低成本部署的有效路径。
 \end{abstract}
 
 % =====================================================================
 \section{引言}
 \label{sec:intro}
 
-\subsection{我们到底要解决什么问题}
-金融机构需要"如果……会怎样"的能力：如果接下来进入一段崩盘行情，我的期权组合会如何？如果波动率持续抬升，做市策略的回撤有多大？历史数据里这类极端情景稀少且不可重放，于是人们转向\emph{生成式}市场模拟器。但一个真正可用的模拟器必须满足三件事，缺一不可：
+金融时间序列生成模型被广泛用于压力测试交易策略、扩充稀缺数据，以及在历史中欠采样的情景下为衍生品定价。与图像或文本不同，金融生成器只有在同时复现一整套风格化事实——重尾收益、波动率聚集、杠杆效应——并使其样本路径上的衍生品价格与真实数据生成过程一致时，才具有实用价值~\citep{cont2001empirical}。这两项要求并不等价：一个模型可能边际直方图逼真却为期权定错价格，反之亦然。本文要回答的问题是：如何训练一个既可被外部动作控制、又能在长程自由推演中保持自洽、且生成路径上的期权价格逼近 oracle 的金融世界模型。
 
-\begin{enumerate}\itemsep2pt
-\item \textbf{可控（controllable）}。使用者要能指定情景——"给我一段崩盘"——而不是被动接受模型吐出的随机样本。这要求模型是\emph{动作条件}的：一个外部智能体在每一步设定市场区制，模型据此响应。
-\item \textbf{自洽（self-consistent）}。模拟器要在\emph{自由演化}下展开很长的时间跨度（我们用一个交易年 $=252$ 步）而不崩坏。这远难于单步预测：单步的微小偏差会在 252 步上\emph{复合累积}，把终端分布的尺度与尾部彻底带偏。
-\item \textbf{金融保真（financially faithful）}。生成路径上算出的\emph{衍生品价格}要对。这与"边际直方图像不像"并不等价——一个模型可以把收益直方图拟合得很好却给期权定价错误，反之亦然~\citep{cont2001empirical}。
-\end{enumerate}
+\subsection{世界模型视角}
+本文采用世界模型的视角~\citep{ha2018world,alonso2024diamond}：生成器是一个动作条件的市场模拟器，外部智能体在每一步通过选择离散区制（正常、高波动、崩盘）来驱动它。本文的状态定义为
+\[
+s_t=(\log v_t,\ r_{t-1}),
+\]
+其中 $v_t$ 为 Heston 瞬时方差，$r_{t-1}$ 为上一期对数收益，动作 $a_t$ 为离散市场区制。模型学习单步转移核
+\[
+p_\theta(\log v_{t+1},\,r_t\mid \log v_t,\,r_{t-1},\,a_t),
+\]
+并在给定或采样的区制序列下，将该转移核自回归复合 $252$ 次以模拟一个完整交易年。这一框架带来两点贯穿全文的影响。其一，模型在自由 rollout 下评测：自回归展开整年而不回填真实状态，即不使用教师强制。这远比一步预测困难，并暴露曝光偏差，即教师强制训练与自由生成之间的训练与测试错配~\citep{bengio2015scheduled}。其二，可控性要求模型结构必须接受动作通道，并在被强制进入罕见区制时保持稳定。
 
-\subsection{为什么现有方法不够}
-把这三条放在一起，现有方法各有硬伤。
-\textbf{对抗式生成器}（以金融领域的标准基线 Quant-GAN~\citep{wiese2020quant} 为代表）训练不稳定，且其稳定化技巧常以压扁尾部为代价（其原始实现中的 LayerNorm$+\tanh$ 会把峰度压到接近正态）；GAN 也没有任何分布层面的保证。
-\textbf{经典计量经济模型}（GARCH~\citep{bollerslev1986garch} 及其重尾变体）能抓住波动率聚集，但它们\emph{不可控}（没有区制这个动作维度），也无法作为可微的世界模型嵌入下游智能体。
-\textbf{非参数重采样}（块自助法）几乎完美地复刻边际分布——因为它就是在回放真实数据——但它\emph{结构上}无法被驱动进入指定区制，也无法外推出数据中不存在的新情景。
-\textbf{逐步预测模型}（包括朴素训练的流匹配/扩散）只优化\emph{单步}转移，从不优化它在自由 rollout 下\emph{实际产生的整条路径}的分布，因而在长程复合下暴露偏差严重。
+\subsection{两阶段及联合转移流匹配}
+\label{sec:progressive}
 
-\subsection{我们的思路与贡献}
-我们采取\emph{世界模型}视角~\citep{ha2018world,alonso2024diamond}。所谓世界模型，是指一个\emph{可学习的、动作条件的环境模拟器}：它学习环境动态的转移核 $p_\theta(s_{t+1}\mid s_t, a_t)$，使得一个外部智能体可以反复"想象"地推演（rollout）未来，用于规划或评估，而无需与真实环境交互。一个对象要称为世界模型，需具备三要素——\emph{状态 $s$、动作 $a$、可自回归推演的学习转移核}。
-本文的实例化是：\textbf{环境}$=$市场的潜在状态 $s_t=(\vt,\,r_{t-1})$（当前瞬时方差与上一期收益）；\textbf{动作}$=$离散市场区制 $a_t\in\{$正常$,$高波动$,$崩盘$\}$，由使用者/智能体在每一步设定；\textbf{转移核}$=$我们学习的两阶段条件分布 $p_\theta(\vt[t+1],r_t\mid \vt,r_{t-1},a_t)$（\S\ref{sec:setup}）。它满足全部三要素，并且\emph{可被动作驱动}（指定区制即可生成对应情景）、\emph{可自由推演}（自回归展开 252 步），因此是名副其实的世界模型，而不仅是一个收益分布拟合器。
-生成骨架选用\emph{流匹配}~\citep{lipman2023flow,liu2023rectified,albergo2023stochastic}——一个免模拟、训练稳定、且支持有原则少步蒸馏的连续时间框架。在此 teacher 之上：
+\paragraph{两阶段转移流匹配}
+相对 GARCH 与 Quant-GAN 等基线，第一步改进是用流匹配学习单步转移。Heston 中方差先于收益生成，存在天然的因果结构，因此最直接的做法是将联合转移分解为先后两个条件流匹配阶段：先采样下一方差，再以其为条件采样下一收益。配合用以缓解曝光偏差的调度采样，两阶段流匹配已明显优于上述基线。
 
-\paragraph{贡献一（方法核心）：严格恰当的路径分布微调。}
-我们指出 teacher 的根本局限是"目标错配"：它最小化\emph{逐步}回归损失，却从不直接约束它在自由 rollout 下产生的\emph{路径分布}。我们因此在一个\emph{可微 rollout} 上，用一组\emph{严格恰当}~\citep{gneiting2007strictly} 的路径分数（签名核 MMD~\citep{salvi2021signature,issa2023nonadversarial,gretton2012kernel}、Sig-W$_1$~\citep{ni2021sigwgan,ni2020conditional}、能量分数~\citep{pacchiardi2024probabilistic}）替代 Quant-GAN 的对抗判别器。我们将论证：这些来自不同论文的思路之所以\emph{搬到我们这里恰好有效}，是因为它们各自精确地命中了金融路径的一个互补侧面，而组合起来覆盖了"定价主导矩—时间结构—幅度结构"三个维度。
+\paragraph{联合转移流匹配}
+然而两阶段分解人为割裂了方差与收益由相关布朗运动产生的强耦合：前一阶段的偏差会作为条件进入后一阶段，并在一整年的自回归推演中逐步累积。本文据此从架构层面重新设计 teacher——把下一方差与下一收益作为一个联合变量同时建模，使单步采样一次性给出二者，从结构上保留其相关性。该联合转移流匹配是本文的主方法，其定价质量大幅超越两阶段分解（见第~\ref{sec:results} 节）。这一“分解 $\to$ 联合”的递进，是本文方法论的核心线索。
 
-\paragraph{贡献二：少步蒸馏与"学生超越老师"的机理。}
-模拟器要便宜才实用。我们把多步 teacher 蒸馏为一步/少步学生（一致性~\citep{song2023consistency,song2024improved}、Mean-Flow~\citep{geng2025meanflow}、Lagrangian flow-map~\citep{boffi2025flowmaps}）。我们不仅给出基准，更给出一个\emph{一致的机理解释}：一致性蒸馏在长程复合 rollout 中扮演了"端点投影/方差缩减"的角色，因而能在校准定价上\emph{超过 teacher}；而同一机制压扁尾部，于是它只在这一个轴上超越——这与全文权衡完全自洽。
+\subsection{面向部署的一步蒸馏}
+一个市场模拟器只有在长程推演足够廉价时才具备实用性。高质量的转移采样通常需在每一步反复调用网络若干次，若对一整年的每个交易日都如此，代价过高。为便于部署，本文希望得到只需单次网络调用即可给出下一状态的采样器，做法是把多步转移 teacher 蒸馏为一个一步模型。这里的核心困难在于训练与部署之间的分布错配：若一步模型仅在取自真实数据的条件上训练，部署时它面对的却是自身先前各步生成的状态，这一错配会在长程推演中被放大。本文的应对是让一步模型在其自身推演实际访问到的状态上进行蒸馏，并以 teacher 在这些状态上的端点作为学习目标——这一 on-policy 端点修正是本文在蒸馏侧的主要创新。
 
-\paragraph{贡献三：诚实的评测与校准假象。}
-我们以自由 rollout 在留出测试集与独立 MC 预言机上评测，并同时报告 \raw{}（未校准）与 \cal{}（矩校准）。真实测试集自身相对预言机的定价误差为 $0.165$（有限样本地板）。我们表明单次仿射矩校准即可把误差压到地板\emph{以下}，并论证这是注入两个数据统计量的\emph{假象}而非生成质量——这一区分在金融生成文献中被普遍低估。
-
-我们的核心结论：基础 FM teacher 是 \raw{} 自洽冠军（$0.475$）；调度采样给出最佳程式化事实平衡（峰度 $4.41$ vs.\ 真实 $4.60$）；SIGMA 微调给出训练阶段最佳校准定价（SIGMA-Pin $0.180$），并经一致性蒸馏进一步达到\emph{全局最佳、且仍在地板之上}的 $0.170$（1 步学生 SIGMA-Base$\to$CD）；而 raw 自洽与校准定价之间存在一条无法被事后手段抹去的系统张力。
+\subsection{本文贡献}
+\begin{itemize}\itemsep2pt
+\item 本文先以两阶段转移流匹配（含调度采样）超越 GARCH-$t$ 与 Quant-GAN 基线，再提出作为主方法的联合转移流匹配 teacher，从架构上消除两阶段间的条件误差传播，在自由 rollout 下取得 \raw{} 定价 RMSE $0.094$。
+\item 本文提出 on-policy 端点蒸馏，令一步学生在其自身 rollout 状态分布上匹配冻结 teacher 的端点，将一步学生由 $0.179$ 推至 $0.101$，在保留路径结构（终端 $W_1$、Abs-ACF、杠杆相关、峰度）的同时实现 NFE1 部署。
+\item 本文将严格正常评分的路径分布微调（SIGMA）、可微定价微调，与 CD、Mean-Flow、flow-map 三类蒸馏置于统一协议下评测，并与 Quant-GAN、GARCH(1,1)-$t$、移动块自助法对照，刻画出原始与校准之间的权衡，说明优化低维定价目标的风险。
+\end{itemize}
 
 % =====================================================================
 \section{相关工作}
 \label{sec:related}
 
-\paragraph{金融时间序列生成。}
-Quant-GAN~\citep{wiese2020quant} 用时序卷积生成器 + Lambert-W 重尾输出~\citep{goerg2015lambert} + WGAN-GP 训练。Sig-WGAN 及其条件变体~\citep{ni2021sigwgan,ni2020conditional} 用基于签名的 Wasserstein-1 距离替换判别器，利用签名~\citep{lyons2007differential} 线性化路径泛函的性质。TimeGAN~\citep{yoon2019timegan} 在学习嵌入中结合对抗与监督损失。经典基线 GARCH/GJR~\citep{bollerslev1986garch,glosten1993relation,bollerslev1987conditionally} 在波动率聚集上仍是必须超越的参照。
+\paragraph{金融时间序列生成模型}
+Quant-GAN~\citep{wiese2020quant} 将时序卷积生成器、Lambert-W 重尾输出变换~\citep{goerg2015lambert} 与 WGAN-GP 目标~\citep{gulrajani2017improved} 相结合。Sig-WGAN 及其条件变体~\citep{ni2021sigwgan,ni2020conditional} 以基于签名的 Wasserstein-1 距离替换学习到的判别器，利用签名~\citep{lyons2007differential} 将路径泛函线性化的性质。TimeGAN~\citep{yoon2019timegan} 在学习到的嵌入空间中结合对抗与监督损失。经典计量基线——GARCH 及其非对称 GJR 变体配以 Student-$t$ 创新~\citep{bollerslev1986garch,glosten1993relation,bollerslev1987conditionally}——在波动率聚集上依然强劲，是任何深度模型必须超越的参照。
 
-\paragraph{流匹配、扩散与世界模型。}
-流匹配~\citep{lipman2023flow}、修正流~\citep{liu2023rectified} 与随机插值~\citep{albergo2023stochastic} 学习把噪声输运到数据的连续时间速度场，规避了扩散~\citep{ho2020denoising,karras2022elucidating} 在采样上的困难。世界模型~\citep{ha2018world,alonso2024diamond} 学环境的动作条件模拟器；本文把这一视角引入量化金融。
+\paragraph{流匹配与世界模型}
+流匹配~\citep{lipman2023flow}、修正流~\citep{liu2023rectified} 与随机插值~\citep{albergo2023stochastic} 学习将噪声输运到数据的连续时间速度场，规避了扩散模型~\citep{ho2020denoising,karras2022elucidating} 在分数匹配与采样上的困难，其训练比扩散或 GAN 更稳定，并天然支持有原则的少步蒸馏。世界模型~\citep{ha2018world,alonso2024diamond} 学习环境的动作条件模拟器；本文将这一视角引入量化金融，把市场区制视为动作。
 
-\paragraph{严格恰当评分规则。}
-若评分规则的期望仅在真实分布处唯一最小化，则称严格恰当~\citep{gneiting2007strictly}。能量分数与核/MMD 分数~\citep{gretton2012kernel} 均严格恰当，已被用于训练概率预测器~\citep{pacchiardi2024probabilistic} 与无判别器神经 SDE~\citep{issa2023nonadversarial}。
+\paragraph{严格正常评分规则与路径分布损失}
+若一个评分规则的期望仅在真实分布处唯一取得最小值，则称其为严格正常的~\citep{gneiting2007strictly}。能量分数与核及 MMD 分数~\citep{gretton2012kernel} 是严格正常的，已被用于训练概率预报器~\citep{pacchiardi2024probabilistic} 以及无需判别器的神经 SDE~\citep{issa2023nonadversarial}。本文将若干此类路径级分数（签名核 MMD~\citep{salvi2021signature}、Sig-$W_1$ 期望签名项、能量分数）组合为一个非对抗的路径分布微调目标。
 
-\paragraph{少步蒸馏。}
-一致性模型~\citep{song2023consistency,song2024improved} 学沿概率流 ODE 不变的一步映射；Mean-Flow~\citep{geng2025meanflow} 学时间平均速度；flow-map 自蒸馏~\citep{boffi2025flowmaps} 学双时映射 $X(x,s,t)$，可用 $K$ 步复合换质量。本文首次在自由演化金融 rollout 下统一比较三者。
+\paragraph{少步蒸馏}
+一致性模型~\citep{song2023consistency,song2024improved} 学习沿概率流 ODE 不变的一步映射。Mean-Flow~\citep{geng2025meanflow} 学习用于一步采样的时间平均速度。Flow-map 自蒸馏~\citep{boffi2025flowmaps} 通过拉格朗日目标学习两时刻输运映射，无需空间导数，并支持 $K$ 步组合以换取质量与算力的可调权衡。据本文所知，本工作是首个在自由 rollout 的金融模拟下系统比较这三类蒸馏，并提出 on-policy 端点修正以弥合训练与部署条件分布错配的研究。
 
 % =====================================================================
-\section{问题动机与数据合成}
+\section{问题设定与评测协议}
 \label{sec:setup}
 
-\subsection{数据如何合成，以及为什么这样设计}
-\label{sec:data}
-我们需要一个既\emph{现实}又\emph{真值可知}的测试平台。现实性来自 Heston 随机波动率模型~\citep{heston1993}：它内生地产生波动率聚集与（通过 $\rho<0$ 的杠杆相关）负偏。但单一 Heston 过于平稳、过于简单。我们因此叠加一个三区制\emph{马尔可夫切换}，使数据具备三种现实特征：重尾（来自区制混合）、非平稳（区制随机切换）、以及一个天然的\emph{可控动作}（区制本身）。在区制 $a\in\{\text{正常},\text{高波动},\text{崩盘}\}$ 下，
+\subsection{三区制马尔可夫切换 Heston 数据}
+真实市场服从 Heston 随机波动率模型~\citep{heston1993}，其参数按马尔可夫链在三个潜在区制间切换。在区制 $a_t\in\{\text{正常},\text{高波动},\text{崩盘}\}$ 下，
 \begin{align}
-dS_t &= \mu_a S_t\,dt + \sqrt{\vt}\,S_t\,dW^S_t, \\
-d\vt &= \kappa_a(\theta_a-\vt)\,dt + \xi_a\sqrt{\vt}\,dW^v_t,
-\qquad d\langle W^S,W^v\rangle_t = \rho_a\,dt .
+dS_t &= \mu_{a_t} S_t\,dt + \sqrt{v_t}\,S_t\,dW^S_t, \\
+dv_t &= \kappa_{a_t}(\theta_{a_t}-v_t)\,dt
+      + \xi_{a_t}\sqrt{v_t}\,dW^v_t,\qquad
+d\langle W^S,W^v\rangle_t = \rho_{a_t}\,dt .
 \end{align}
-三个区制的参数 $(\kappa,\theta,\xi,\rho,\mu)$ 分别为 $(2,0.04,0.3,-0.7,0.05)$、$(3,0.09,0.5,-0.7,0.05)$、$(4,0.16,0.8,-0.7,-0.2)$：
-\emph{正常}区制温和上行；\emph{高波动}区制把长期方差 $\theta$ 与波动率之波动 $\xi$ 同时抬高；\emph{崩盘}区制兼具最高的 $\theta,\xi$ 与\emph{负漂移} $\mu=-0.2$，从而制造肥厚的左尾——这正是风险管理最关心、历史数据最稀缺的情景。
-区制按行随机转移矩阵演化，对角线高度持久（$0.992,0.95,0.90$），使每个区制成片出现而非逐日抖动，符合真实市场"平静期—危机期"交替的特征。
+三个区制的 $(\kappa,\theta,\xi,\rho,\mu)$ 分别取 $(2,0.04,0.3,-0.7,0.05)$、$(3,0.09,0.5,-0.7,0.05)$、$(4,0.16,0.8,-0.7,-0.2)$；区制由行随机转移矩阵演化，对角占优（$0.992,0.95,0.90$）以保证持续性。本文采用 Andersen QE 格式~\citep{andersen2008simple} 离散方差，时间步 $dt=1/252$，每条路径 $252$ 步（一个交易年），初始价格 $S_0=100$、初始方差 $v_0=0.04$。训练、验证、测试路径分别为 $50$k、$5$k、$10$k；并以独立随机种子生成 $100$k 条 MC 路径作为期权定价 oracle。
 
-\paragraph{离散化与切分。}我们以 $dt{=}1/252$、$T{=}252$ 步、$S_0{=}100$、$v_0{=}0.04$ 模拟。为避免欧拉格式的方差截断偏差，方差用 Andersen~\citep{andersen2008simple} 的\emph{二次—指数}（QE）格式离散，对数收益用其带鞅修正的更新式——这是文献中精度最高的 Heston 离散方案之一，保证我们的"真值"本身可靠。
-我们生成训练 $50$k、验证 $5$k、测试 $10$k 条路径（种子 $20260530$），并\emph{独立地}（种子 $20260519$）再生成 $100$k 条作为\emph{MC 预言机}。
-
-\paragraph{为什么用合成数据。}关键不在"省钱"，而在\emph{真值可知}。因为我们掌握真实的数据生成过程，就能在 $100$k 条独立真路径上用蒙特卡洛算出\emph{无偏}的期权价格作为定价参照——这是真实市场永远做不到的（真实市场没有"正确价格"标签）。这把"生成器好不好"从主观的视觉判断变成了可证伪的数值问题。
-
-\subsection{世界模型分解}
-我们自回归地建模单步转移。记 $r_t$ 为对数收益、$a_t$ 为区制动作，世界模型把每步分解为
+\subsection{世界模型的单步转移分解}
+本文自回归地建模单步转移，并在全文中比较两种分解。第一种是两阶段分解，按 Heston 的因果结构先后采样方差与收益：
 \begin{equation}
-p_\theta(\vt[t{+}1], r_t \mid \vt, r_{t-1}, a_t)
-= \underbrace{p^{\mathrm{vol}}_\theta(\vt[t{+}1]\mid \vt, r_{t-1}, a_t)}_{\text{方差阶段}}\;
-  \underbrace{p^{\mathrm{ret}}_\theta(r_t\mid \vt[t{+}1], \vt, r_{t-1}, a_t)}_{\text{收益阶段}} ,
+p_\theta(\log v_{t+1},r_t\mid\cdot)
+= \underbrace{p^{\mathrm{vol}}_\theta(\log v_{t+1}\mid \cdot)}_{\text{方差阶段}}\;
+  \underbrace{p^{\mathrm{ret}}_\theta(r_t\mid \log v_{t+1},\cdot)}_{\text{收益阶段}},
 \end{equation}
-其中 $r_{-1}{=}0$。先采方差、再采（以新方差为条件的）收益，这一因果顺序与 Heston 的结构一致。完整模拟通过\emph{自由演化 rollout} 产生：采 $\vt[t+1]$，再采 $r_t$，追加，在外部选定的区制序列下重复 252 步。
+其中 $r_{-1}=0$。第二种是作为主方法的联合分解，将下一方差与下一收益作为一个二维联合变量一次性建模：
+\begin{equation}
+p_\theta\big(\log v_{t+1},\,r_t \mid \log v_t,\,r_{t-1},\,a_t\big).
+\end{equation}
+两种分解的具体训练算法见第~\ref{sec:method} 节。一次完整模拟由自由 rollout 产生：采样下一状态、追加，并在外部给定的区制序列下重复 $252$ 步。
 
-\subsection{评测协议（生成式、留出式、无教师强制）}
+\subsection{自由 rollout 与 oracle 定价}
 \label{sec:eval}
-我们强调评测的"诚实性"，因为很多金融生成工作只报单步或教师强制指标，而那会系统性高估自由生成能力。我们的协议是：模型只在训练集上训练、用验证集选检查点；评测时让模型\emph{从零自由生成} $5000$ 条全新路径（从 $S_0,v_0$ 出发、区制由马尔可夫链采样、FM ODE 用 $16$ 步积分、\emph{全程不看测试集}），再做三类比较：
-\begin{itemize}\itemsep2pt
-\item \textbf{相对 MC 预言机的期权定价 RMSE}（首要金融指标）：欧式看涨，价值度 $\{0.85,0.90,0.95,1.00,1.05\}\times$到期 $\{0.25,0.5,1.0\}$。真实测试集相对预言机的误差为 $\mathbf{0.165}$——有限样本\emph{地板}，任何生成器都不该"诚实地"低于它。
-\item \textbf{程式化事实}：主看池化对数收益的峰度（真实 $\mathbf{4.60}$），辅以收益/绝对收益自相关、杠杆相关。
-\item \textbf{签名–Wasserstein 距离}（深度 3）：度量整条路径分布的差异。
-\end{itemize}
+所有模型均在自由 rollout 下评测。模型自 $(S_0,v_0)$ 出发，自回归生成 $252$ 个交易日，过程中不读取测试集真实状态。主指标为生成路径上欧式看涨期权价格相对 MC oracle 的 RMSE 与 MAPE，价值度（moneyness）取 $\{0.85,0.90,0.95,1.00,1.05\}$，到期取 $\{0.25,0.5,1.0\}$，共 $15$ 个价格点；期权价格由蒙特卡洛在生成路径上估计，并与 oracle 价格逐点比较。辅助指标包括终端收益 Wasserstein $W_1(R_T)$、逐日收益边际 Wasserstein、绝对收益自相关 L1（Abs-ACF L1）、杠杆相关 L1（Lev L1）、峰度与尾指数。
 
-\paragraph{\raw{} 与 \cal{}，以及地板的意义。}
-\raw{} 直接用生成器输出。\cal{} 施加单次仿射\emph{矩校准}：把池化生成收益标准化后，重缩放到\emph{训练数据}的收益均值与标准差（故无测试泄漏），再定价。校准对只需价格的从业者合理，但它恰好注入两个主导期权价格的数（前两阶矩）。因此\textbf{任何低于 $0.165$ 的 \cal{} 都是校准假象}，我们一律标注。
+\subsection{原始与校准两种报告口径}
+\label{sec:rawcal}
+本文以两种口径报告定价 RMSE。\raw{} 直接使用生成器输出，反映生成器自身的保真度。\cal{} 在生成器输出之上施加一次仿射矩校准：将池化的生成收益标准化后，按数据收益的均值与标准差重新缩放再行定价（与 Quant-GAN 所用的矩校准一致）。这里需要说明 \cal{} 的含义与用途：矩校准是真实部署中也完全可以使用的标准后处理——只关心价格的从业者可以在任意生成器输出上施加同样的两阶矩对齐，因此 \cal{} 衡量的是模型经此标准后处理后的定价可用性，并不是作弊。需要注意的是，矩校准注入了数据收益的前两阶矩，而期权价格高度依赖这两阶矩，所以 \cal{} 与 \raw{} 反映的是两个不同侧面：\raw{} 直接反映生成器学到的动力学是否逼真，\cal{} 反映其作为定价工具的实用性。本文同时报告二者，并在后续分析中直接对照其数值、客观给出结论。作为量级锚点，真实测试集相对 oracle 的 \raw{} RMSE 为 $0.165$、MAPE 为 $0.0112$、峰度为 $4.60$，这是 $10$k 条测试路径相对 $100$k oracle 的有限样本 MC 误差参照。
 
 % =====================================================================
 \section{方法}
 \label{sec:method}
 
-\subsection{两阶段流匹配世界模型，以及为什么是 FM 而非扩散或 GAN}
-\label{sec:teacher}
-流匹配~\citep{lipman2023flow} 学一个速度场 $v_\theta(x,\tau,c)$，把 $\tau{=}0$ 的高斯先验沿直线插值 $x_\tau=(1-\tau)x_0+\tau x_1$ 输运到 $\tau{=}1$ 的数据，目标为
+本文的方法分为两部分：转移模型的训练（\S\ref{sec:train}）与面向部署的一步蒸馏（\S\ref{sec:distill}）。训练部分沿 \S\ref{sec:progressive} 的递进路线展开——先给出两阶段流匹配及其两种事后微调（路径分布微调与可微定价微调），再给出作为主方法、从架构上解决其瓶颈的联合转移流匹配 teacher。蒸馏部分按尝试与演化顺序展开——先比较三类一步蒸馏的参数化，再给出作为主蒸馏方法的 on-policy 端点修正。两部分合在一起，构成一套面向“可控、自洽、定价保真”这一目标的转移建模与一步部署算法。
+
+\subsection{转移模型的训练}
+\label{sec:train}
+
+\subsubsection{两阶段转移流匹配与调度采样}
+\label{sec:twostage}
+利用 Heston 中方差先于收益生成的因果结构，两阶段流匹配把单步转移分解为方差阶段
+$p^{\mathrm{vol}}_\theta(\log v_{t+1}\mid \log v_t,r_{t-1},a_t)$
+与收益阶段
+$p^{\mathrm{ret}}_\theta(r_t\mid \log v_{t+1},\log v_t,r_{t-1},a_t)$，
+每一阶段用流匹配~\citep{lipman2023flow,liu2023rectified} 训练一个条件速度场：在噪声 $x_0\sim\mathcal N(0,I)$ 与目标 $x_1$ 之间构造线性插值 $x_\tau=(1-\tau)x_0+\tau x_1$，并以 $\|v_\theta(x_\tau,\tau,c)-(x_1-x_0)\|_2^2$ 回归条件期望速度。
+
+由于 teacher 以一步监督训练却需自由部署，收益阶段的条件收益 $r_{t-1}$ 在部署时来自模型自身样本，产生曝光偏差。为缓解，本文以调度采样~\citep{bengio2015scheduled} 训练收益阶段：以概率 $p$ 将真实条件收益替换为模型采样，使训练条件逐步靠近部署分布。$p=0.8$ 给出最佳风格化事实平衡（峰度 $4.41$）。两阶段流匹配把 \raw{} 定价 RMSE 降至 $0.475$，显著优于 GARCH-$t$（$1.089$）与 Quant-GAN（$5.4$）；但其绝对误差仍高，提示瓶颈在分解本身，而非任一阶段的拟合，从而引出下文的两类改进尝试与最终的架构重设计。
+
+\subsubsection{严格正常评分的路径分布微调（SIGMA）}
+\label{sec:sigma}
+两阶段 teacher 的逐步监督只约束单步转移，并不直接约束整条路径的分布。为在路径层面对齐生成分布与真实分布，本文提出 SIGMA（strictly-proper-scoring path-distribution fine-tuning）：在可微的自由 rollout 上，以一组严格正常评分规则~\citep{gneiting2007strictly} 构成的路径分布损失对 teacher 做后微调。与 Quant-GAN 依赖 WGAN-GP 判别器不同，SIGMA 完全非对抗——严格正常评分规则的期望仅在真实分布处唯一取得最小值，因此可直接作为优化目标，既无需训练判别器，也避免了对抗训练的不稳定。这是本文在训练侧的创新之一。
+
+具体地，SIGMA 在长度 $L$ 的生成路径分布 $\hat P$ 与真实路径分布 $P$ 之间最小化
 \begin{equation}
-\mathcal L_{\mathrm{FM}}
-= \E_{\tau\sim U[0,1],\,x_1\sim\mathcal D,\,x_0}
-\big\| v_\theta(x_\tau,\tau,c) - (x_1-x_0) \big\|^2 .
+\mathcal L_{\mathrm{SIGMA}}
+= \lambda_{\mathrm{sk}}\,\mathrm{MMD}^2_{\mathrm{sigker}}(\hat P,P)
++ \lambda_{\mathrm{s1}}\,\mathrm{Sig}\text{-}W_1(\hat P,P)
++ \lambda_{\mathrm{e}}\,\mathrm{Energy}(\hat P,P)
++ \lambda_{\mathrm{m}}\,\mathcal R_{\mathrm{mom}}
++ \lambda_{\mathrm{t}}\,\mathcal R_{\mathrm{tail}} .
 \end{equation}
-方差阶段 $x_1$ 为（归一化对数）下一方差、$c=(\vt, r_{t-1}, a_t)$；收益阶段 $x_1$ 为下一对数收益、$c=(\vt[t{+}1],\vt, r_{t-1}, a_t)$。速度场是残差 MLP（隐藏 $256$、$6$ 块、正弦时间嵌入），批 $4096$、$60$ 轮、余弦学习率 $2\!\times\!10^{-4}$、$10\%$ 动作 dropout（以便区制的无分类器引导）。
+其中签名核 MMD~\citep{salvi2021signature,issa2023nonadversarial,gretton2012kernel} 通过路径签名的核内积比较两个路径分布，对路径的高阶时序依赖（如波动率聚集）敏感；Sig-$W_1$ 期望签名项~\citep{ni2021sigwgan,ni2020conditional} 比较两分布的期望签名，线性地刻画路径泛函；能量分数~\citep{pacchiardi2024probabilistic} 是多元分布上的严格正常评分；后两项为低阶矩与尾部正则，稳定训练并防止终端尺度漂移。整条 rollout 关于网络参数可微，梯度经重参数化采样回传至 teacher。
 
-\paragraph{为什么 FM 的思路在这里特别有效。}本任务的单步条件分布是\emph{一维、连续、单峰}的（给定状态与区制，下一收益/方差的分布形状温和）。这恰是 FM 的甜区：
-（i）它\emph{免对抗}，不会像 GAN 那样模式崩塌或压扁尾部——这正是 Quant-GAN 的痛点；
-（ii）它学的是\emph{直线}输运，ODE 近似仿射，少步积分误差小——这在我们\emph{把单步采样复合 252 次}的场景里至关重要：每步的积分误差会沿 rollout 累积，越直的轨迹累积越少。我们在实验中用一个\emph{同架构、同两阶段}的 DDPM 基线验证了这一点：把目标换成扩散去噪、采样换成扩散采样后，\raw{} 自洽性从 FM 的 $0.475$ 急剧恶化到 $2.855$（\S\ref{sec:results}）。这不是实现差异，而是"直线输运 vs 弯曲扩散轨迹"在长程复合下的本质差别。
+SIGMA 能单调改善校准后定价（最优 \cal{} $0.180$），表明路径分布损失确实在拉近生成分布与真实分布；但其 \raw{} 质量与峰度仍不及后文的 joint-FM。这说明事后的路径微调难以弥补两阶段分解在结构上引入的误差，从而促使本文从“微调既有 teacher”转向“重新设计 teacher 架构”。
 
-\paragraph{调度采样（scheduled sampling，SS）：直击暴露偏差。}
-\emph{暴露偏差}（exposure bias）指：teacher 训练时，条件 $r_{t-1}$ 永远是\emph{真实}的上一期收益（教师强制）；但自由部署时，条件变成模型\emph{自己上一步生成}的收益。二者分布不同，模型在训练中从未"见过"自己的输出分布，于是一旦自由 rollout，误差会在 252 步上\emph{复合放大}——这就是\emph{长程}暴露偏差。调度采样~\citep{bengio2015scheduled} 的做法是：训练时以概率 $p$ 把条件 $r_{t-1}$ 换成模型自身的采样值（而非真值），让模型在训练阶段就暴露于自己的误差分布。我们取 $p{=}0.8$，得到最佳程式化事实平衡（峰度 $4.41$，最接近真实 $4.60$）：它不直接降低定价误差，但显著改善长程形状稳定性，是 \raw{} 与形状之间最甜的折中。
+\subsubsection{可微定价微调}
+\label{sec:diffprice}
+SIGMA 在路径分布层面对齐，而本文的主指标是 oracle 期权价格，于是一个自然的想法是直接对价格求导。可微定价微调将生成路径上的欧式期权价格以可微蒙特卡洛实现，并以其相对 oracle 价格网格的 RMSE 作为损失，对生成器（teacher 或其蒸馏学生）做端到端微调。其吸引力在于直接优化评测指标、且价格关于路径可微，梯度信号明确。本文把它作为一种探索方案纳入，并在 \S\ref{sec:res_pricing} 给出具体消融（施加于 flow-map 学生）。
 
-\paragraph{Lambert-W 重尾核（LWFM）——一个探索性变体，非最优流程的一部分。}为诚实起见我们明确说明：我们\emph{探索过}在流匹配前对收益施加 Lambert-W 重尾变换~\citep{goerg2015lambert}（参数 $\delta$）、采样时反演以重注尾部，记为 LWFM。一个小扫描（$\delta\in\{0.03,\dots,0.12\}$）确实把峰度从 $3.88$ 推到 $4.3$ 附近、更接近真实 $4.60$（\S\ref{sec:results}）。但它\emph{并未进入我们最终最优的流程}：最佳校准定价（$0.180$）来自把路径损失微调施加在\emph{FM 世界模型（进阶）}（不含 LWFM）之上。因此本文把 LWFM 报告为"有益但非必要"的尾部建模变体，而非核心组件——这也提醒：单点改善峰度（LWFM）与改善定价（路径损失）针对的是不同维度。
+之所以要讨论这一方法，是因为它清楚地揭示了一个风险：期权价格只是路径分布在 $15$ 个价格点上的低维投影，直接拟合该投影虽能压低定价 RMSE（最优 $0.158$），却给模型留下了以扭曲路径动力学换取价格拟合的捷径——实验中它系统性放大绝对收益自相关与杠杆相关、压低峰度。因此本文讨论可微定价微调，不是把它当作主方法，而是用它反衬出：应当在路径分布与状态分布层面建模，而非直接拟合低维定价目标。这一负面证据为后文的联合建模与 on-policy 蒸馏提供了直接动机。
 
-\subsection{SIGMA：严格恰当的路径分布微调（本文方法核心）}
-\label{sec:pathloss}
-\paragraph{方法命名。}我们把本文的核心训练算法命名为 \textbf{SIGMA}（\textbf{SI}gnature--ener\textbf{G}y \textbf{MA}tching）——它一方面点明方法本质（用\emph{签名}与\emph{能量}这类严格恰当分数做路径分布匹配），另一方面恰好是希腊字母 $\sigma$（波动率），契合金融语境。具体地，\textbf{SIGMA $=$ 在"进阶"FM 世界模型基座（两阶段流匹配 $+$ 调度采样，\S\ref{sec:teacher}）之上施加本节的严格恰当路径分布微调}。我们用权重配置区分两个变体：\textbf{SIGMA-Base}（默认权重，校准定价 $0.232$）与 \textbf{SIGMA-Pin}（在 Base 上调高矩匹配与锚定正则权重以"钉住"定价主导矩，得本文训练阶段最佳校准定价 $\mathbf{0.180}$）。
-
-\paragraph{痛点。}teacher 最小化的是\emph{逐步}回归损失：它学"给定真实的上一时刻，下一时刻像不像"。但它从不优化它在\emph{自由 rollout} 下产生的\emph{整条路径}的分布——而后者才是我们真正部署、真正评测的对象。这个"训练目标"与"部署目标"之间的缺口，是长程暴露偏差的根源。
-
-\paragraph{思路：用可微 rollout + 严格恰当路径分数闭合缺口。}我们把 FM 采样器重参数化，使梯度能穿过 $252$ 步生成，得到生成路径批 $\hat R\in\R^{B\times T}$，并用一组严格恰当~\citep{gneiting2007strictly} 路径分数与真实批 $R$ 比较，\emph{替代} Quant-GAN 的 WGAN-GP 判别器：
+\subsubsection{主方法：联合转移流匹配 teacher}
+\label{sec:jointfm}
+两阶段分解、路径微调与定价微调的共同局限指向同一根源：将方差与收益拆成先后两个阶段，人为割裂了二者由相关布朗运动产生的强耦合，前一阶段的偏差作为条件进入后一阶段，并在 $252$ 步自回归推演中累积。本文据此从架构层面重新设计 teacher——不再分解，而是把下一方差与下一收益作为一个二维联合变量一次性建模。令
+\[
+x_1 = (\log v_{t+1},\, r_t), \qquad c=(\log v_t,\,r_{t-1},\,a_t),
+\]
+在噪声 $x_0\sim\mathcal N(0,I)$ 与真实样本 $x_1$ 之间构造修正流插值~\citep{lipman2023flow,liu2023rectified,albergo2023stochastic}
+\[
+x_\tau=(1-\tau)\,x_0+\tau\,x_1,\qquad \tau\sim U[0,1],
+\]
+并训练一个联合速度场以匹配条件期望速度
 \begin{equation}
-\mathcal L
-= \lambda_{\mathrm{sig}}\,\mathcal L_{\mathrm{sigMMD}}
-+ \lambda_{w_1}\,\mathcal L_{\mathrm{SigW_1}}
-+ \lambda_{e}\,\mathcal L_{\mathrm{energy}}
-+ \mathcal L_{\mathrm{moment}} ,
+\mathcal L_{\mathrm{joint}}
+=\E_{\tau,x_0,x_1,c}
+\left\|v_\theta(x_\tau,\tau,c)-(x_1-x_0)\right\|_2^2 .
 \end{equation}
-其中 $\mathcal L_{\mathrm{moment}}$ 聚合低阶矩、终端方差、绝对收益、峰度匹配，及一个使微调后场不偏离 teacher 太远的锚定正则。
+速度场为带正弦时间嵌入的残差 MLP，并对区制动作做一定比例的 dropout，以便采样时可用无分类器引导来增强可控性。采样时自 $x_0$ 出发积分 ODE $\dot x=v_\theta(x,\tau,c)$，本文最优 teacher 取 EMA epoch 60、Euler $\nfe{=}120$。
 
-\paragraph{为什么"别人论文的思路"搬到这里恰好有效——它们各自命中一个互补侧面。}
-这是本节的关键论证。金融路径的真实性不是单一标量，而是若干\emph{不同性质}的统计量的并集；我们选的三个分数恰好覆盖了互补的三块，且都\emph{严格恰当}（即不会像对抗判别器那样给出无意义的最优）：
-\begin{itemize}\itemsep3pt
-\item \textbf{签名核 MMD（命中"时间/序列结构"）。}签名~\citep{lyons2007differential} 把一条路径映成它所有迭代积分的张量，\emph{线性化}了路径泛函——而我们关心的程式化事实（已实现方差、波动率聚集）与期权收益本身\emph{就是}路径泛函。于是在签名特征上做 MMD~\citep{gretton2012kernel,salvi2021signature,issa2023nonadversarial}，等价于直接比较"我们真正在意的那些路径量"的分布：
-\begin{equation}
-\mathcal L_{\mathrm{sigMMD}}
-= \E\,k(\phi_R,\phi_{R'}) + \E\,k(\phi_{\hat R},\phi_{\hat R'})
-- 2\,\E\,k(\phi_R,\phi_{\hat R}),\quad \phi=\mathbf S(\cdot)\ \text{深度 }3.
-\end{equation}
-\item \textbf{Sig-W$_1$ 期望签名（命中"一阶路径泛函的均值"）。}$\mathcal L_{\mathrm{SigW_1}}=\|\E[\mathbf S(R)]-\E[\mathbf S(\hat R)]\|$~\citep{ni2021sigwgan,ni2020conditional} 匹配截断深度内所有多项式路径泛函的\emph{期望}，给签名 MMD 提供一个低方差、强信号的一阶约束。
-\item \textbf{能量分数（命中"幅度/联合尺度"）。}$\mathcal L_{\mathrm{energy}}=2\E\|R-\hat R\|-\E\|\hat R-\hat R'\|-\E\|R-R'\|$~\citep{pacchiardi2024probabilistic} 是标准化收益路径上的总体能量距离，对整体\emph{幅度与联合尺度}敏感——这正是签名类分数容易忽视的维度。
-\end{itemize}
-\textbf{为什么必须组合，且组合严格优于任一单项。}这不是"把几个 loss 堆在一起"，而是有可证伪的机理。每个分数都只对它所"覆盖"的统计量子空间严格恰当，对其余子空间\emph{不敏感}，因而单用时会沿不敏感方向自由漂移：实验中（\S\ref{sec:ablation-path}）仅签名类分数对齐了路径\emph{形状}却对\emph{绝对尺度}无约束，于是尺度漂移、校准崩坏（\cal{} $>10$）；仅能量/仅矩锁住了尺度却放任\emph{时间结构}。把三者相加，等价于把它们各自的"零损失流形"求\emph{交集}：唯有同时对齐时间结构（签名）、一阶路径泛函均值（Sig-W$_1$）、幅度尺度（能量）与定价主导矩（矩项）的分布，总损失才接近零——这就是组合严格优于单项的数学原因。
-\textbf{我们的原创性}不在于发明这些分数，而在于三点此前未被组合实现的设计：（i）首次把一组\emph{严格恰当}的路径分数组织进一个\emph{可微世界模型的自由 rollout 微调}中，从而直接对"部署时真正产生的路径分布"求梯度，闭合了逐步训练与自由部署之间的目标缺口；（ii）论证并实验证明这三个分数在\emph{金融路径}上恰好张成互补且必要的三维，给出一个可复用的"路径真实性 = 时间结构 $\oplus$ 一阶泛函 $\oplus$ 幅度尺度 $\oplus$ 定价矩"的设计范式；（iii）以此\emph{替换} Quant-GAN 的对抗判别器——我们放弃判别器的自适应，换来训练稳定性、无 min-max 振荡、以及可控、可单调改进的行为——沿"基础 teacher $\to$ 对抗判别器 $\to$ 严格恰当组合 $\to$ 加重定价矩权重"这一路径，各阶段的最佳校准定价依次为 \cal{}~$0.583\!\to\!0.420\!\to\!0.362\!\to\!0.180$（每个数为该阶段的最优配置）。
+联合建模相较两阶段的关键优势在于：方差与收益的耦合（包括杠杆相关）由单个速度场一次性给出，不存在两阶段之间的条件误差传播。这一架构改动把 \raw{} 定价 RMSE 从两阶段的 $0.475$ 一举降至 $0.094$，并使峰度等风格化事实自然落在真实值附近，无需任何事后矩校准或定价微调。换言之，本文并非把若干现成模块拼接，而是针对“联合转移”这一任务结构，构造出一个以联合速度场为核心、以动作 dropout 实现可控性的训练算法，这正是本文方法的研究价值所在。
 
-我们冻结方差阶段，对收益阶段以学习率 $5\!\times\!10^{-6}$ 微调 $10$ 轮（批 $512$、rollout ODE $4$ 步），$(\lambda_{\mathrm{sig}},\lambda_{w_1},\lambda_e)=(200,5,10)$。
-
-\subsection{少步蒸馏，以及"学生为何能超越老师"}
+\subsection{一步蒸馏}
 \label{sec:distill}
-在 252 步 rollout 上每步每阶段做 16 步 ODE 代价高昂。我们把 teacher 蒸馏为一步/少步学生：
-\textbf{一致性蒸馏（CD）}~\citep{song2023consistency,song2024improved} 学一个其一步输出沿 teacher ODE 不变的学生；
-\textbf{Mean-Flow（MF）}~\citep{geng2025meanflow} 学时间平均速度以一步采样；
-\textbf{Lagrangian flow-map}~\citep{boffi2025flowmaps} 学双时映射 $X(x,s,t)=x-(t-s)G_\theta(x,s,t)$，沿映射自身轨迹强制 $\tfrac{d}{dt}X=v_{\mathrm{teacher}}(X,t)$，并支持 $K$ 步复合。
+联合 teacher 质量虽高，但 $\nfe{=}120$ 不适合作为部署采样器：一整年 $252$ 步、每步上百次网络调用，代价过高。蒸馏的目标是得到一个一步学生 $F_\phi(z,c)\approx x_1$，对每个交易日仅需一次前向（NFE1）。本文按尝试与演化的顺序展开：先比较三类一步蒸馏的参数化，确定最优起点；再在该起点上提出作为主蒸馏方法的 on-policy 端点修正。
 
-\paragraph{为什么"teacher + 一致性"能在校准定价上超过 teacher 本身——一个方差缩减/端点投影的解释。}
-这看似反直觉（学生不该比老师强），但在我们的\emph{长程复合 rollout} 设定下有清晰机理。
-teacher 的每一步都用一个\emph{多步随机}ODE 采样器（16 步）从噪声积分到样本；每次积分都注入新的采样噪声与离散化误差，这些误差沿 252 步以近似随机游走的方式\emph{累积}，污染终端收益分布的\emph{尺度（方差）结构}。
-一致性学生把 teacher 的整条 ODE 轨迹\emph{压缩成一个确定性的一步映射}（把 $z$ 直接送到 ODE 端点），这在效果上等价于对 teacher 采样器做了一次\emph{端点投影/方差缩减}：单步映射不再逐步注入积分噪声，于是复合 rollout 的累积误差更小，终端方差结构更干净、更稳定。
-而期权价格——尤其\emph{校准后}定价——几乎完全由终端方差主导，因此"更干净的终端方差"直接转化为更低的 \cal{}：这就是 SIGMA-Base$\to$CD 把 \cal{} 从 teacher 的 $0.232$ 降到 $0.170$（仍在 $0.165$ 地板之上）的来源。
-\textbf{但这不是免费的}：同一个"压缩/平滑"操作也削平了重尾——学生峰度从 teacher 的 $\sim 3.6$ 掉到 $3.1/2.85$。于是学生\emph{只在 \cal{} 这一个轴上超过 teacher}，而在 \raw{} 自洽与峰度上变差。数据中"\cal{} 降、峰度同向降"的指纹，正是这一机制的证据，也与全文 raw$\leftrightarrow$校准权衡完全自洽：蒸馏不是凭空变强，而是把"采样噪声/尾部真实性"换成了"终端方差的洁净度"。
-此外，FM 的\emph{直线}插值使 teacher ODE 近似仿射、曲率低，一步一致性映射\emph{易学}；这也是 CD（而非 MF/flow-map）能成功迁移的结构性原因——后两者要逼近的"平均速度/双时映射"在重尾、强状态依赖、且需复合 252 次的条件下是远更难的回归目标，微小偏差以乘性方式放大，导致尾部发散（\S\ref{sec:results-distill}）。
+\subsubsection{三类一步蒸馏的参数化}
+\label{sec:distillfamily}
+在同一冻结的 joint-FM teacher 上，本文比较三种学生参数化。一致性蒸馏（CD）~\citep{song2023consistency,song2024improved} 学习沿 teacher 概率流 ODE 不变的一步映射；Mean-Flow~\citep{geng2025meanflow} 回归用于一步采样的时间平均速度；flow-map 自蒸馏~\citep{boffi2025flowmaps} 通过拉格朗日目标直接学习从噪声与条件到 teacher 端点的两时刻映射，无需空间导数。三者中，flow-map 直接以 teacher 的联合端点为目标，最贴合本文 \raw{} 质量的诉求；实验（\S\ref{sec:res_distill}）表明朴素 flow-map 的一步 RMSE 为 $0.179$，明显优于 CD（$0.447$）与 Mean-Flow（$2.292$），因此本文以 flow-map 作为后续修正的初始学生。
+
+值得注意的是，朴素 flow-map 虽已是最优起点，其 $0.179$ 与 teacher 的 $0.094$ 仍有差距。这一差距并非源于一步参数化的表达能力不足——flow-map 已能很好地表示 teacher 的联合端点——而是源于训练分布与部署分布的不一致：朴素 flow-map 在取自真实数据的条件上训练，部署时却面对自身 rollout 产生的状态。这一诊断直接引出本文的主蒸馏方法。
+
+\subsubsection{主蒸馏方法：on-policy teacher-endpoint 修正}
+\label{sec:onpolicy_method}
+本文在蒸馏侧的主要创新，是把训练条件从“真实数据状态”替换为“学生自身 rollout 实际访问的状态”，并在这些状态上用冻结 teacher 提供端点监督，从而直接针对上述曝光偏差。算法如下：
+\begin{enumerate}\itemsep2pt
+\item 令当前一步学生自由 rollout 若干步，收集学生自身产生的 on-policy 条件 $c_{\mathrm{op}}$；
+\item 对同一噪声 $z$ 与同一条件 $c_{\mathrm{op}}$，用冻结 joint-FM teacher 以 $\nfe{=}120$ 积分得到端点 $T(z,c_{\mathrm{op}})$，作为该状态下的监督标签；
+\item 训练一步学生输出 $F_\phi(z,c_{\mathrm{op}})$ 匹配该端点，并保留朴素 flow-map loss 作为正则；
+\item 周期性地用更新后的学生重新收集 $c_{\mathrm{op}}$，使训练条件持续跟随部署分布。
+\end{enumerate}
+目标函数为
+\begin{equation}
+\mathcal L_{\mathrm{op}}
+=\left\|F_\phi(z,c_{\mathrm{op}})-T(z,c_{\mathrm{op}})\right\|_2^2
++\lambda_{\mathrm{fm}}\,\mathcal L_{\mathrm{flowmap}} .
+\end{equation}
+该模型在部署时仍为一步学生；teacher 只在训练阶段提供端点标签，不进入部署，因而不增加任何推理成本。与 CD 等多轮 progressive distillation 不同，on-policy 端点修正不引入中间 teacher，也不把目标改成低维价格，而是同时在“学生实际访问的状态分布”和“teacher 的高质量端点”两处对齐，从而既弥合曝光偏差、又不破坏路径动力学。最优配置为 teacher $\nfe{=}120$、on-policy horizon 128、每次 512 条路径、30 个 update step、1 个 epoch、学习率 $5\times10^{-6}$、flow-map 正则权重 1。该修正把一步学生的定价 RMSE 由 $0.179$ 降至 $0.101$，逼近多步 teacher，构成本文最终交付的可部署采样器。
 
 % =====================================================================
-\section{实验与结果}
+\section{实验}
 \label{sec:results}
 
-\paragraph{实现与基线。}模型在 RTX-5090 上以 PyTorch 训练。基线含：
-（i）\textbf{Quant-GAN}~\citep{wiese2020quant} 原版配方（best/last）；
-（ii）\textbf{GARCH(1,1)-$t$}~\citep{bollerslev1986garch,bollerslev1987conditionally}（MLE 拟合，$\hat\alpha{=}0.082,\hat\beta{=}0.911,\hat\nu{=}6.1$，CPU）；
-（iii）\textbf{DDPM}：与 FM teacher \emph{同架构、同两阶段、同 rollout、同评测}，仅把目标换成扩散去噪、采样换成 50 步扩散采样——专门用来回答"为什么选 FM 而非扩散"；
-（iv）\textbf{块自助法}~\citep{kunsch1989jackknife,politis1994stationary}（块长 $21$）作为\emph{非生成参照}（数据回放，见表注）。
-所有 FM/扩散模型共享同一两阶段架构与同一评测，仅训练目标/配置不同；关键配置见表~\ref{tab:config}，便于复现并厘清各模型差异。
+\paragraph{基线}
+除上述学习型方法外，本文与三个标准参照对比：其一为 Quant-GAN~\citep{wiese2020quant}，按其原配方（TCN 生成器、Lambert-W 输出、WGAN-GP）实现，并报告其最优与最后检查点；其二为 GARCH(1,1)-$t$~\citep{bollerslev1986garch,bollerslev1987conditionally}，对池化训练收益做极大似然拟合（$\hat\alpha{=}0.082$，$\hat\beta{=}0.911$，$\hat\nu{=}6.1$）；其三为移动块自助法~\citep{kunsch1989jackknife,politis1994stationary}，对真实训练收益按块长 $21$ 重采样。后两者是经典计量参照，无需 GPU；二者均非动作条件，无法被驱动进入指定区制，而这正是世界模型新增的可控性。
+
+\subsection{主结果：从两阶段到联合，再到一步部署}
+\label{sec:res_main}
+表~\ref{tab:main_joint} 给出核心结果，并印证 \S\ref{sec:progressive} 的递进路线。沿“两阶段 $\to$ 联合”这一主线，定价质量发生了量级上的改变：作为第一阶优化的两阶段流匹配 teacher 为 $0.475$（见表~\ref{tab:unified}），而作为主方法的 joint-FM teacher 仅为 $0.094$——把方差与收益放进一个联合速度场、消除两阶段间的条件误差传播，是这一跃升的直接来源。joint-FM teacher 因此构成 \raw{} 质量的上界，其峰度 $4.371$ 也已贴近真实值 $4.60$，且全程未用任何矩校准或定价微调，说明该质量来自学到的动力学本身。
+
+蒸馏侧的故事同样清晰。朴素 flow-map 一步模型的 RMSE 为 $0.179$，保留了 teacher 的大部分能力但仍有可见差距，且其峰度偏高至 $5.974$、终端 $W_1$ 偏大至 $0.0131$，暴露出曝光偏差在长 rollout 中的累积。on-policy 端点修正同时改善价格与路径分布：RMSE 由 $0.179$ 降至 $0.101$，终端收益 Wasserstein 由 $0.0131$ 降至 $0.0052$，杠杆相关由 $0.00212$ 降至 $0.00086$，峰度由 $5.974$ 调至 $4.356$（真实值 $4.60$）。这表明把训练条件对齐到学生实际访问的状态分布，确实在多个相互独立的维度上同时见效，而非仅仅压低单一指标。它在 $W_1(R_T)$ 上与 teacher 的评测样本相当，应理解为有限样本波动，而非学生整体支配 teacher。作为对照，pricing-aware flow-map 虽把 RMSE 压到 $0.1577$，却把 Abs-ACF L1 推高到 $0.0430$、峰度压到 $3.350$，清楚地落在“以路径结构换价格”的失败模式上。
 
 \begin{table}[t]
 \centering
-\caption{各模型/家族的关键训练配置（FM/扩散均为同一两阶段残差-MLP 架构）。SS=调度采样比例；动作 dropout 用于无分类器引导；路径损失微调冻结方差阶段、仅微调收益阶段。}
-\label{tab:config}
-\small
-\begin{tabular}{l l l l l l}
+\caption{核心结果：joint-FM teacher 与一步学生，均为未校准 \raw{} 评测。真实测试集相对 oracle 的 RMSE $0.165$ 为有限样本 MC 误差参照；teacher 使用 Euler NFE120；所有学生均为一步（NFE1）部署。每列最优值以粗体标记。}
+\label{tab:main_joint}
+\resizebox{\textwidth}{!}{%
+\begin{tabular}{l c c c c c c c}
 \toprule
-模型 / 家族 & 架构(隐藏$\times$块) & 批大小 & 轮数/步数 & 学习率 & 关键设置 \\
+模型 & RMSE $\downarrow$ & MAPE $\downarrow$ & $W_1(R_T)$ $\downarrow$ & 边际 $W_1$ $\downarrow$ & Abs-ACF L1 $\downarrow$ & Lev L1 $\downarrow$ & 峰度 $\to4.60$ \\
 \midrule
-FM 世界模型（基础 teacher） & 256$\times$6 & 4096 & 60 轮 & $2e{-}4$ 余弦 & 动作 dropout 0.1；无 SS \\
-\quad + 调度采样（SS） & 收益 128$\times$4 & 512 & 15 轮 & $3e{-}4$ & SS$=0.8$（沿用基础方差阶段） \\
-FM 世界模型（进阶） & 256$\times$6 & 8192 & 方差20/收益15 轮 & $1e{-}3$/$5e{-}4$ & SS$=0.5$（SIGMA 微调的基座） \\
-SIGMA 路径损失微调 & 冻结方差/微调收益 & 512 & 10 轮(rollout 4 步) & $5e{-}6$ & $\lambda_{\text{sig,w1,e}}{=}(200,5,10)$＋矩/锚定 \\
-DDPM（同架构，扩散基线） & 256$\times$6 & 4096 & 30k 步 & $2e{-}4$ 余弦 & $T{=}1000$；50 步采样 \\
-一致性蒸馏（CD 学生） & 同 teacher 架构 & 512 & 15 轮 & $3e{-}4$ & 1 步采样（NFE$=1$） \\
+真实测试集 vs oracle（10k vs 100k） & 0.1646 & 0.0112 & -- & -- & -- & -- & 4.603 \\
+Joint-FM teacher（EMA60, NFE120） & \best{0.0942} & \best{0.0095} & 0.0061 & 0.00030 & 0.0043 & 0.00086 & 4.371 \\
+Flow-map（朴素一步） & 0.1789 & 0.0145 & 0.0131 & 0.00051 & \best{0.0042} & 0.00212 & 5.974 \\
+Pricing-aware flow-map & 0.1577 & 0.0174 & 0.0236 & 0.00080 & 0.0430 & 0.00892 & 3.350 \\
+On-policy flow-map（一步部署） & \best{0.1010} & 0.0110 & \best{0.0052} & \best{0.00028} & 0.0047 & \best{0.00086} & \best{4.356} \\
 \bottomrule
-\end{tabular}
+\end{tabular}}
 \end{table}
 
-\subsection{主结果}
-表~\ref{tab:main} 给出头部对比。
-其一，\textbf{基础 FM teacher} 在\emph{学习型生成器中}取得最佳 \raw{}（$\best{0.475}$），逼近地板，远胜同架构的 \textbf{DDPM}（$2.855$）、GARCH-$t$（$1.089$）与 Quant-GAN（$5.4$–$5.7$）；其近乎相等的 \raw{}/\cal{}（$0.475/0.583$）说明它\emph{真正自洽}、不靠校准。DDPM 与 FM 的鸿沟（$2.855$ vs $0.475$）直接印证了 \S\ref{sec:teacher} 的论断：在长程复合下，直线输运的累积误差远小于弯曲扩散轨迹。
-其二，\textbf{调度采样}（FM\,+\,SS）给出最佳程式化事实平衡（峰度 $4.41$、\cal{} $0.348$），是 \raw{} 与形状之间最甜的内点。
-其三，我们的 \textbf{SIGMA 微调}给出训练阶段最佳校准定价（SIGMA-Pin $0.180$），优于对抗判别器（见表~\ref{tab:ablation}）；再经一致性蒸馏，1 步学生 SIGMA-Base$\to$CD 达到\emph{全局最佳且仍在地板之上}的 $\best{0.170}$。
-作为对照，\textbf{GARCH-$t$} 的 \raw{} 出人意料地好（$1.089$，因为它把无条件方差拟合得准），但峰度爆炸到 $19.2$ 且不可控——再次说明"好定价"与"好路径真实性"是两个轴；\textbf{块自助法}（数据回放）几乎贴着地板，但那是参照天花板而非竞争者（它不可控、不可外推）。
-
-\paragraph{逐模型优势与劣势分析。}
-\textbf{主推三模型各自的优势与适用场景：}（a）\emph{FM 基础 teacher} 的优势是\emph{真正自洽}——\raw{}/\cal{} 几乎相等（$0.475/0.583$）说明它不靠校准就能正确定价，适合作为下游智能体反复推演的无偏模拟器；其短板是峰度偏低（$3.88$），尾部略不足。（b）\emph{FM+调度采样} 的优势是\emph{形状最真}（峰度 $4.41$ 最接近 $4.60$）且 \cal{} 不错（$0.348$），适合关注程式化事实/风险形状的场景；代价是 \raw{} 略升到 $0.872$。（c）\emph{SIGMA-Pin} 的优势是\emph{校准定价最优}（$0.180$），适合接入市场报价后的精确定价；其短板是 \raw{} 升到 $2.595$、峰度降到 $3.63$——它把能力集中投到了"定价主导矩"上。
-\textbf{表现差的模型，劣势与成因：}\emph{Quant-GAN}（\raw{} $5.4$–$5.7$）成因是对抗训练不稳定 + 其稳定化技巧压扁/扭曲尾部（峰度高达 $10.2$），且无区制条件；\emph{DDPM}（\raw{} $2.855$）与 FM 同架构却差 $6$ 倍，成因是扩散的弯曲采样轨迹在 252 步复合下累积误差远大于 FM 的直线输运（这是选 FM 的直接证据）；\emph{GARCH-$t$} 峰度 $19.2$ 的成因是它把整段时间的条件方差混合成一个无条件重尾分布，缺少区制结构去组织尾部。
+\subsection{三类蒸馏：flow-map 为何是正确起点}
+\label{sec:res_distill}
+在 joint-FM teacher 上，本文比较 CD、Mean-Flow 与 flow-map 三类一步蒸馏，结果见表~\ref{tab:distill_joint}。三者差距悬殊：CD 在此设置下 RMSE 为 $0.447$，Mean-Flow 高达 $2.292$，均明显落后于朴素 flow-map 的 $0.179$。原因在于优化目标与本文诉求的匹配程度：joint-FM 的训练目标是把噪声直接输运到联合端点 $x_1=(\log v_{t+1},r_t)$，而 flow-map 恰恰直接以该端点为学习对象，参数化最为贴合；CD 约束的是沿 ODE 的不变性、Mean-Flow 回归的是时间平均速度，二者都要在长复合 rollout 中把局部一致性累积成全局端点精度，误差更易放大。Mean-Flow 的 RMSE 退化到 $2.292$ 即是这种累积偏差的极端表现。这一比较解释了为何本文把后续所有修正（pricing-aware 与 on-policy）都建立在 flow-map 之上，而非 CD 或 Mean-Flow。
 
 \begin{table}[t]
 \centering
-\caption{三区制 Heston 任务在自由演化 rollout 下的主对比（训练配置见表~\ref{tab:config}）。\raw{}/\cal{} = 未校准/矩校准的相对 MC 预言机期权定价 RMSE（越低越好；有限样本地板 $0.165$）。峰度目标 $4.60$。Quant-GAN 为我们\emph{依原论文复现}的实现。"FM 世界模型（进阶）"指更大批量($8192$)+调度采样($0.5$)训练的同架构 teacher，是 SIGMA 微调的\emph{基座}。\textbf{SIGMA} 即本文方法：在该"进阶"基座上做严格恰当路径分布微调；\textbf{SIGMA-Base} 为基础权重（cal $0.232$），\textbf{SIGMA-Pin} 在其上调高矩匹配与锚定正则权重以"钉住"定价主导矩，得训练阶段最佳校准（cal $\mathbf{0.180}$）。蒸馏行"$Y\!\to\!$CD"表示对 teacher $Y$ 做一致性蒸馏。$^{\ddagger}$非生成参照（数据回放）：复用真实收益，故逼近地板在意料之中，但\emph{不可控、不可外推}，是参照而非竞争生成器；"真实测试集"行即定价地板本身。$^{\ast}$学习型生成器中最佳。各列学习型最佳以\best{粗体}。}
-\label{tab:main}
+\caption{Joint-FM teacher 上的三种一步蒸馏。Flow-map 是最优的初始学生，因此后续 pricing-aware 与 on-policy 均只在 flow-map 上进行。}
+\label{tab:distill_joint}
+\resizebox{\textwidth}{!}{%
+\begin{tabular}{l c c c c c c c}
+\toprule
+一步学生 & RMSE $\downarrow$ & MAPE $\downarrow$ & $W_1(R_T)$ $\downarrow$ & 边际 $W_1$ $\downarrow$ & Abs-ACF L1 $\downarrow$ & Lev L1 $\downarrow$ & 峰度 \\
+\midrule
+CD & 0.447 & 0.0361 & 0.0113 & 0.00037 & 0.0072 & 0.00235 & 4.028 \\
+Mean-Flow & 2.292 & 0.1929 & 0.0406 & 0.00164 & 0.0046 & 0.00569 & 4.624 \\
+Flow-map & \best{0.179} & \best{0.0145} & \best{0.0131} & \best{0.00051} & \best{0.0042} & \best{0.00212} & 5.974 \\
+\bottomrule
+\end{tabular}}
+\end{table}
+
+\subsection{可微定价微调消融：价格改善而路径退化}
+\label{sec:res_pricing}
+表~\ref{tab:pricing} 展示可微定价微调（pricing-aware flow-map）的三个配置，定量地坐实了 \S\ref{sec:diffprice} 的担忧。最优定价配置为 $w{=}10,\lambda_{\mathrm{dyn}}{=}0.2$，RMSE 为 $0.158$，确实低于朴素 flow-map 的 $0.179$；但代价是它把 Abs-ACF L1 由 $0.0042$ 推高至 $0.0430$（约 $10$ 倍）、杠杆相关由 $0.0021$ 推高至 $0.0089$（约 $4$ 倍）、峰度由 $5.97$ 压低至 $3.35$。更激进的配置（$\lambda_{\mathrm{dyn}}{=}1.0$ 或 $w{=}30$）甚至连 RMSE 本身也变差（$0.365$、$0.747$），说明强行对齐价格网格会破坏 rollout 的稳定性。这组消融给出一个清晰的实验指纹：直接对 $15$ 个价格点求导，会让学生过拟合价格的低维统计量、走捷径扭曲路径动力学，而非学习真实的转移结构。它从反面论证了本文为何选择在状态分布层面做 on-policy 端点修正，而不是在定价目标上做微调。
+
+\begin{table}[t]
+\centering
+\caption{可微定价微调消融。它能改善 RMSE，但系统性破坏路径动态，因此未作为核心方法。}
+\label{tab:pricing}
+\resizebox{\textwidth}{!}{%
+\begin{tabular}{l c c c c c c}
+\toprule
+配置 & RMSE $\downarrow$ & MAPE $\downarrow$ & $W_1(R_T)$ $\downarrow$ & 边际 $W_1$ $\downarrow$ & Abs-ACF L1 $\downarrow$ & Lev L1 $\downarrow$ \\
+\midrule
+朴素 flow-map & 0.179 & \best{0.0145} & \best{0.0131} & \best{0.00051} & \best{0.0042} & \best{0.0021} \\
+$w{=}10,\lambda_{\mathrm{dyn}}{=}0.2$ & \best{0.158} & 0.0174 & 0.0236 & 0.00080 & 0.0430 & 0.0089 \\
+$w{=}10,\lambda_{\mathrm{dyn}}{=}1.0$ & 0.365 & 0.0453 & 0.0316 & 0.00178 & 0.0368 & 0.0068 \\
+$w{=}30,\lambda_{\mathrm{dyn}}{=}0.1$ & 0.747 & 0.0730 & 0.0320 & 0.00150 & 0.0435 & 0.0101 \\
+\bottomrule
+\end{tabular}}
+\end{table}
+
+\subsection{On-policy 消融：短微调最优，训练更久未必更好}
+\label{sec:res_onpolicy}
+表~\ref{tab:onpolicy_ablation} 给出 on-policy 端点修正的主要扫描，刻画了该方法对各超参数的敏感性。最佳结果来自 teacher NFE120、horizon 128、30 个 update step、1 个 epoch、学习率 $5\times10^{-6}$（RMSE $0.101$）。可以读出三点。其一，teacher 端点质量至关重要：当 teacher 仅以 NFE30 提供标签（首行）时，RMSE 退化到 $0.347$，说明 on-policy 状态回放必须配合高质量端点才能见效。其二，方法对 rollout 规模并不极端敏感：horizon 由 128 减到 64 时 RMSE 仅由 $0.101$ 微升到 $0.103$，说明无需很长的 on-policy 视野即可覆盖学生访问的状态分布。其三，也是最值得注意的，训练更久反而变差：固定其余配置，把 epoch 从 1 增到 2、4，RMSE 由 $0.103$ 单调劣化到 $0.115$、$0.133$。这表明端点 L2 loss 并不是 oracle 定价 RMSE 的单调代理——过度拟合 teacher 端点会偏离真正关心的定价指标，因此必须借助外部评测早停。这一现象也与 \S\ref{sec:res_pricing} 的教训呼应：训练目标与评测指标之间总存在缝隙，盲目压低训练损失并不安全。
+
+\begin{table}[t]
+\centering
+\caption{On-policy flow-map 消融。主配置为 NFE120/h128/s30/e1；所有配置均为一步模型。}
+\label{tab:onpolicy_ablation}
+\resizebox{\textwidth}{!}{%
+\begin{tabular}{l c c c c c c c}
+\toprule
+配置 & RMSE $\downarrow$ & MAPE $\downarrow$ & $W_1(R_T)$ $\downarrow$ & 边际 $W_1$ $\downarrow$ & Abs-ACF L1 $\downarrow$ & Lev L1 $\downarrow$ & 峰度 \\
+\midrule
+NFE30/h64/s60/e4 & 0.347 & 0.0403 & 0.0130 & 0.00057 & 0.0071 & \best{0.00074} & 4.244 \\
+NFE120/h64/s15/e1 & 0.111 & 0.0131 & 0.0056 & 0.00029 & 0.0045 & 0.00086 & \best{4.413} \\
+NFE120/h64/s30/e1 & 0.103 & 0.0114 & 0.0056 & 0.00029 & 0.0052 & 0.00089 & 4.338 \\
+NFE120/h64/s30/e2 & 0.115 & 0.0131 & \best{0.0052} & 0.00029 & 0.0044 & 0.00091 & 4.356 \\
+NFE120/h64/s30/e4 & 0.133 & 0.0155 & 0.0057 & 0.00029 & 0.0042 & 0.00087 & 4.402 \\
+NFE120/h128/s30/e1 & \best{0.101} & \best{0.0110} & 0.0052 & \best{0.00028} & 0.0047 & 0.00086 & 4.356 \\
+NFE120/h252/s30/e1 & 0.105 & 0.0113 & 0.0066 & 0.00029 & \best{0.0037} & 0.00086 & 4.414 \\
+\bottomrule
+\end{tabular}}
+\end{table}
+
+\subsection{与基线及其他方法的统一对比}
+\label{sec:res_baselines}
+表~\ref{tab:unified} 把所有学习型方法与经典基线置于同一 \raw{}、\cal{} 与峰度坐标下，给出全局图景。可作如下观察。其一，沿本文的递进路线，\raw{} 定价拾级而下：基线层面 Quant-GAN 为 $5.4$--$5.7$、GARCH-$t$ 为 $1.089$；第一阶优化的两阶段流匹配把它降到 $0.475$；主方法 joint-FM teacher 进一步降到 $0.094$，一步 on-policy flow-map 为 $0.101$——这条单调下降的链条正是全文叙事的量化体现。其二，关于 \raw{} 与 \cal{} 的对照：joint-FM 与 on-policy flow-map 不依赖矩校准，其 \raw{} 已分别达到 $0.094$ 与 $0.101$；相比之下，SIGMA 路径分布微调与若干 CD 学生能把 \cal{} 压到 $0.170$--$0.180$，但它们的 \raw{} 高达 $1.9$--$2.6$、峰度坍缩到 $3.1$--$3.6$。这说明这些方法的定价可用性几乎全部来自矩校准这一标准后处理，其生成器本身的路径保真度并不高；而本文主方法在校准前就已具备定价能力。其三，移动块自助法虽 \raw{} 定价较低（$0.269$，峰度 $4.58$），但它只是重放真实收益块，属于非参数化的天花板参照——既不可控（无法被驱动进入指定区制），也无法外推到未见情景，因此是参照而非可比的生成器。其四，GARCH-$t$ 的 \raw{} 定价尚可（因其准确刻画了无条件方差），但峰度膨胀至 $19.2$ 且无区制控制，再次说明良好的定价与良好的路径真实性是两个相互独立的维度——这也是本文坚持同时报告定价与多项路径统计的原因。
+
+\begin{table}[t]
+\centering
+\caption{统一对比：所有方法在 \raw{} 与 \cal{} 定价 RMSE 及峰度上的表现。\raw{} 为未校准、\cal{} 为矩校准后的期权定价 RMSE（越低越好）；$0.165$ 为真实测试集相对 oracle 的有限样本误差参照。峰度目标 $4.60$。$^{\ddagger}$ 非参数化重采样的天花板参照：重放真实收益，不可控亦不能外推，是参照而非竞争生成器。}
+\label{tab:unified}
 \small
 \begin{tabular}{l l c c c}
 \toprule
-& 模型 & \raw{} $\downarrow$ & \cal{} $\downarrow$ & 峰度（$\to 4.60$） \\
+& 模型 & \raw{} $\downarrow$ & \cal{} $\downarrow$ & 峰度 $\to4.60$ \\
 \midrule
-\multirow{2}{*}{\shortstack[l]{\emph{参照}\\\emph{(非生成)}}}
- & 真实测试集（vs 预言机） & 0.165 & --- & 4.60 \\
- & 块自助法$^{\ddagger}$（数据回放）\citep{politis1994stationary}   & 0.269 & 0.244 & 4.58 \\
+\multirow{2}{*}{\shortstack[l]{参照\\（非生成）}}
+ & 真实测试集 vs oracle & 0.165 & -- & 4.60 \\
+ & 移动块自助法$^{\ddagger}$（数据重放）~\citep{politis1994stationary} & 0.269 & 0.244 & 4.58 \\
 \midrule
-\multirow{4}{*}{\emph{基线}}
- & Quant-GAN（论文复现，best）\citep{wiese2020quant} & 5.650 & 1.607 & 10.21 \\
- & Quant-GAN（论文复现，last）\citep{wiese2020quant} & 5.429 & 0.674 & 6.39 \\
- & GARCH(1,1)-$t$ \citep{bollerslev1986garch}      & 1.089 & 0.482 & 19.17 \\
- & DDPM（与 FM 同架构/两阶段，扩散目标）\citep{ho2020denoising}      & 2.855 & 0.576 & 3.75 \\
+\multirow{3}{*}{基线}
+ & Quant-GAN（最优检查点）~\citep{wiese2020quant} & 5.650 & 1.607 & 10.21 \\
+ & Quant-GAN（最后检查点）~\citep{wiese2020quant} & 5.429 & 0.674 & 6.39 \\
+ & GARCH(1,1)-$t$~\citep{bollerslev1986garch} & 1.089 & 0.482 & 19.17 \\
 \midrule
-\multirow{6}{*}{\shortstack[l]{\emph{Teacher}\\\emph{(多步)}}}
- & FM 世界模型（基础，256$\times$6）                 & \best{0.475}$^{\ast}$ & 0.583 & 3.88 \\
- & \quad + 调度采样 SS（$p{=}0.8$，缓解暴露偏差） & 0.872 & 0.348 & \best{4.41} \\
- & \quad + LWFM 重尾核（$\delta{=}0.05$，探索性变体） & 0.882 & --- & 4.33 \\
- & FM 世界模型（进阶，bs8192+SS0.5；SIGMA 基座） & 1.057 & 0.582 & 4.08 \\
- & \textbf{SIGMA-Base}（本文方法，基础权重） & 2.595 & 0.232 & 3.66 \\
- & \textbf{SIGMA-Pin}（本文方法，训练阶段最佳） & 2.595 & 0.180 & 3.63 \\
+\multirow{4}{*}{两阶段与微调}
+ & 两阶段 FM teacher & 0.475 & 0.583 & 3.88 \\
+ & 两阶段 FM + 调度采样（$p{=}0.8$） & 0.872 & 0.348 & 4.41 \\
+ & SIGMA-Pin（路径分布微调，最优 \cal{}） & 2.595 & 0.180 & 3.63 \\
+ & SIGMA-Base $\to$ CD & 1.875 & 0.170 & 3.11 \\
 \midrule
-\multirow{2}{*}{\shortstack[l]{\emph{一致性蒸馏}\\（CD，1 步）}}
- & FM+SS $\to$ CD（平衡学生）   & 1.282 & 0.371 & 4.27 \\
- & SIGMA-Base $\to$ CD（最佳校准学生） & 1.875 & \best{0.170} & 3.11 \\
-\bottomrule
-\end{tabular}
-\end{table}
-
-\subsection{超越 RMSE：多维度的真实性}
-\label{sec:multimetric}
-仅看定价 RMSE 会掩盖一个事实：路径真实性是\emph{多维}的。表~\ref{tab:multi} 报告四类互补指标——签名–Wasserstein（整条路径分布）、绝对收益自相关 L1（\emph{波动率聚集}）、杠杆相关 L1（\emph{杠杆效应}）、尾指数与峰度（\emph{尾部厚度}）。结论是\textbf{没有单一赢家}，这恰是全文 raw$\leftrightarrow$校准权衡在更多维度上的体现。
-
-\begin{table}[t]
-\centering
-\caption{关键模型的扩展指标（自由 rollout，对真实测试集）。签名–W、绝对收益 ACF-L1（波动率聚集）、杠杆 ACF-L1 越低越好；尾指数目标 $\approx 4.28$、峰度目标 $4.60$。"真实测试集/块自助法"为非生成参照（灰义）。各列在\emph{生成型学习模型}中的最优以\best{粗体}。}
-\label{tab:multi}
-\small
-\begin{tabular}{l c c c c c}
-\toprule
-模型 & 签名-W $\downarrow$ & 波动聚集 $\downarrow$ & 杠杆 $\downarrow$ & 尾指数 $\to4.28$ & 峰度 $\to4.60$ \\
- & ($\times10^{-2}$) & (absACF-L1) & (lev-L1) & & \\
-\midrule
-\emph{真实测试集}（参照） & 0.00 & 0.000 & 0.000 & 4.28 & 4.60 \\
-\emph{块自助法}（数据回放） & 0.59 & 0.0354 & 0.0040 & 4.30 & 4.58 \\
-\midrule
-Quant-GAN（复现，last） & 2.03 & 0.0050 & 0.0035 & 4.03 & 6.39 \\
-GARCH(1,1)-$t$           & 0.85 & 0.0104 & 0.0291 & 2.82 & 19.17 \\
-DDPM（同架构）           & 1.66 & 0.0223 & 0.0085 & 4.85 & 3.75 \\
-FM 世界模型（基础）       & 1.20 & 0.0156 & 0.0052 & 4.78 & 3.88 \\
-FM + 调度采样（FM+SS）   & 1.04 & 0.0111 & 0.0063 & \best{4.39} & \best{4.41} \\
-FM 世界模型（进阶）       & 0.99 & 0.0148 & 0.0103 & 4.61 & 4.08 \\
-SIGMA-Pin（最佳 cal）     & 4.48 & 0.0308 & 0.0143 & 5.49 & 3.63 \\
-FM+SS $\to$ CD（平衡学生） & \best{0.84} & \best{0.0018} & \best{0.0037} & 4.47 & 4.27 \\
-SIGMA-Base $\to$ CD       & 5.76 & 0.0285 & 0.0078 & 6.99 & 3.11 \\
-\bottomrule
-\end{tabular}
-\end{table}
-
-\paragraph{从扩展指标读出的故事。}
-（1）\textbf{路径级真实性的赢家是"调度采样及其一致性学生"}：\emph{CD$\leftarrow$FM+SS} 在签名距离、波动率聚集、杠杆三项上同时最优（波动聚集 $0.0018$，比 FM 的 $0.0156$ 好近一个数量级），\emph{FM+调度采样} 则在尾指数/峰度上最接近真实。这说明"治暴露偏差(SS) + 端点投影(CD)"对\emph{动态结构}的恢复最有效。
-（2）\textbf{块自助法的破绽被这张表抓住}：它签名距离极低（$0.0059$，因为就是真实数据），但\emph{波动率聚集是所有正经模型里最差}（$0.0354$，甚至差于 GARCH 的 $0.0104$）——因为 21 天分块拼接破坏了跨块的长程波动率聚集。它"回放边际"却"打断动态"，再次印证它是参照而非可用生成器。
-（3）\textbf{我们最佳 cal 模型(SIGMA-Pin / SIGMA-Base$\to$CD)的代价在此可见}：它们签名距离与波动率聚集明显变差（签名-W $0.045$–$0.058$），尾部甚至过厚（尾指数 $5.5$–$7.0$）——这正是它们 \raw{} 差的根因：为压低校准定价的两个主导矩，牺牲了路径级动态。
-（4）\textbf{GARCH 与 DDPM 的劣势成因}：GARCH 杠杆相关最差（$0.0291$，它没有杠杆机制）且尾指数 $2.82$ 过厚（峰度 $19$）；DDPM 各项平庸且签名距离差于 FM，印证扩散弯曲轨迹在长程复合下的劣势。
-
-\subsection{消融：单个恰当分数为何不足、组合为何成功}
-\label{sec:ablation-path}
-表~\ref{tab:ablation} 在同一 teacher/rollout 上隔离各组件，直接验证 \S\ref{sec:pathloss} 的互补性论证。
-\emph{仅}签名类分数（sig-MMD / Sig-W$_1$）因\emph{无视绝对尺度}而把校准搞崩（\cal{} $15.1$/$11.8$）——它们对齐了路径\emph{形状}却放任\emph{幅度}漂移，而幅度直接决定期权价格。
-\emph{仅}能量或\emph{仅}矩抓住了尺度却丢了时间结构，停在 \cal{} $1.5$–$2.9$。
-\emph{对抗}式 WGAN-GP 判别器（把 Quant-GAN 目标移植到我们的 rollout）达 \cal{} $0.420$。
-只有\emph{组合}的严格恰当一篮子达到 \cal{} $0.362$：因为它同时锁住"时间结构（签名）+ 幅度（能量）+ 定价主导矩（矩项）"。这条消融正是组合严格优于单项的直接证据——\emph{任一}单项都不行，\emph{合起来}既稳又全。
-两点澄清。其一，\textbf{此处的 WGAN-GP 行不是我们方法的一部分}：它是把 Quant-GAN 的对抗判别器目标移植到\emph{相同}可微 rollout 上，作为"对抗 vs 严格恰当"的对照——我们的方法用严格恰当分数\emph{替换}了它（\cal{} $0.362<0.420$），并且没有 min-max 振荡。其二，本表组合的 \cal{} $0.362$ 与表~\ref{tab:main} 的最佳 $0.180$ 是\emph{同一方法在不同 teacher 基座}上的结果：本消融为公平起见统一在 LWFM teacher 上做单变量对照，而表~\ref{tab:main} 的最优来自把同一路径损失施加在\emph{FM 世界模型（进阶）}上并加重矩/锚定权重——可见基座与权重共同决定终值，但"组合$>$单项$>$对抗"的结论与基座无关。
-
-\begin{table}[t]
-\centering
-\caption{路径分布损失的组件消融（同一 teacher/rollout）。任一单项均不足；组合击败对抗式 WGAN-GP 判别器。}
-\label{tab:ablation}
-\small
-\begin{tabular}{l c c c}
-\toprule
-路径损失配置 & \raw{} $\downarrow$ & \cal{} $\downarrow$ & 峰度（$\to 4.60$） \\
-\midrule
-仅矩（控制组）                       & 2.566 & 2.904 & 3.49 \\
-仅 sig-MMD                                & 5.510 & 15.08 & 4.78 \\
-仅 Sig-W$_1$                              & 4.971 & 11.79 & 4.59 \\
-仅能量                                 & 1.814 & 1.555 & 3.39 \\
-WGAN-GP 判别器（Quant-GAN 目标）        & 1.746 & 0.420 & 4.21 \\
-\textbf{组合（sig-MMD + Sig-W$_1$ + 能量 + 矩）} & 1.717 & \best{0.362} & 4.22 \\
-\bottomrule
-\end{tabular}
-\end{table}
-
-\subsection{蒸馏研究：一致性迁移、Mean-Flow 失败}
-\label{sec:results-distill}
-表~\ref{tab:distill} 印证 \S\ref{sec:distill} 的机理。
-\textbf{一致性蒸馏}跨 teacher 迁移成功：它既保住平衡学生的形状（FM+SS$\to$CD 峰度 $4.27$、\raw{} $1.28$），又继承 SIGMA 的校准优势，并通过"端点投影/方差缩减"把 \cal{} 从 SIGMA-Base 的 $0.232$ 进一步压到 $\best{0.170}$——\emph{超过其 teacher，且仍在 $0.165$ 地板之上}（即真实的生成质量提升，而非校准假象）。
-
-\paragraph{为什么蒸馏 SIGMA-Base 而非更激进的 SIGMA-Pin。}
-一个自然的疑问是：既然 SIGMA-Pin（cal $0.180$）比 SIGMA-Base（cal $0.232$）校准更好，为何不蒸馏前者？原因正是本文反复强调的"地板与假象"逻辑。CD 的"端点投影/方差缩减"本身会\emph{再压低一截 cal}（约 $0.06$）：从 SIGMA-Base 出发，$0.232\!\to\!0.170$ 恰好落在 $0.165$ 地板\emph{之上}，是可信的真实提升；若从已经把矩"钉"得很紧的 SIGMA-Pin（$0.180$）出发，叠加 CD 的方差缩减极易跌破地板（我们确实观察到此类 $<0.165$ 的配置），那将是\emph{校准假象}而非更好的生成器。换言之，我们\emph{有意}选择从更"温和、保留更多路径结构"的 SIGMA-Base 蒸馏，让 CD 的增益停在地板之上、可被诚实解读；这是一个由评测诚实性驱动的、而非碰巧的设计选择。
-与此对照，\textbf{Mean-Flow 失败}：无论何种 teacher，MF 学生都退化（FM$\to$MF \raw{} $9.08$）或爆炸（SIGMA-Base$\to$MF \cal{} $37.6$、峰度坍到 $2.49$）。机理如 \S\ref{sec:distill}：MF 的"时间平均速度"对重尾、强状态依赖、且需复合 252 次的收益条件分布是糟糕的拟合，单步偏差以乘性累积。
-\textbf{诚实警示}：若用更激进的设置把 \cal{} 压到 $0.165$ 地板\emph{以下}（我们也观察到过），那将是注入两个数据矩的\emph{校准假象}而非生成质量；故本表只报告地板之上的结果，并在 \raw{} 与 \cal{} 并列下判读。
-
-\begin{table}[t]
-\centering
-\caption{一步蒸馏。一致性蒸馏（CD）迁移成功并在 \cal{} 上超过其 teacher（SIGMA-Base 0.232 $\to$ CD 0.170，且仍在地板之上）；Mean-Flow（MF）失败。}
-\label{tab:distill}
-\small
-\begin{tabular}{l l c c c}
-\toprule
-Teacher & 学生 & \raw{} $\downarrow$ & \cal{} $\downarrow$ & 峰度（$\to 4.60$） \\
-\midrule
-FM 基础        & CD & 4.810 & 0.537 & 4.48 \\
-FM 基础        & MF & 9.084 & 1.442 & 3.52 \\
-FM+SS          & CD & 1.282 & 0.371 & 4.27 \\
-SIGMA-Base     & CD & 1.875 & \best{0.170} & 3.11 \\
-SIGMA-Base     & MF & 7.536 & 37.62 & 2.49 \\
-\bottomrule
-\end{tabular}
-\end{table}
-
-\subsection{少步 flow-map：NFE 拐点依指标而异}
-\label{sec:results-nfe}
-表~\ref{tab:nfe} 在 $K\in\{1,2,4,8\}$ 上扫描 Lagrangian flow-map 学生。最优 NFE 随指标变化：\raw{} 在 $K{=}2$ 最佳（$1.82$），\cal{} 在 $K{=}1$ 最佳（$0.313$）。增加步数\emph{并不}单调有益——峰度从 $4.86$（$K{=}1$）膨胀到 $8.10$（$K{=}8$），因为复合放大尾部误差。flow-map 在极低 NFE 下有竞争力但不及一致性蒸馏；一次热启动符号审计也未能修复，说明其弱点是 rollout/路径分布错配而非初始化。
-
-\begin{table}[t]
-\centering
-\caption{少步 Lagrangian flow-map 学生的 NFE（$K$）扫描（单一检查点）。拐点依指标而异（\raw{}：$K{=}2$；\cal{}：$K{=}1$）；更多步数膨胀尾部。}
-\label{tab:nfe}
-\small
-\begin{tabular}{l c c c c}
-\toprule
-$K$（NFE） & 1 & 2 & 4 & 8 \\
-\midrule
-\raw{} $\downarrow$  & 2.736 & \best{1.819} & 3.090 & 3.437 \\
-\cal{} $\downarrow$  & \best{0.313} & 2.355 & 3.745 & 3.857 \\
-峰度（$\to 4.60$） & 4.86 & 5.53 & 7.85 & 8.10 \\
+\multirow{2}{*}{本文方法}
+ & Joint-FM teacher（NFE120） & \best{0.094} & -- & 4.37 \\
+ & On-policy flow-map（一步部署） & \best{0.101} & -- & 4.36 \\
 \bottomrule
 \end{tabular}
 \end{table}
 
 % =====================================================================
-\section{对比分析与讨论}
+\section{讨论}
 \label{sec:discussion}
 
-\paragraph{一条贯穿全文的主线：raw$\leftrightarrow$校准权衡。}
-把表~\ref{tab:main}–\ref{tab:distill} 串起来看，存在一条几乎无例外的规律：\emph{每一个}降低校准定价或把峰度推向目标的操作，都以 \raw{} 自洽为代价，反之亦然。
-基础 FM teacher 处一端（\raw{} $0.475$、\cal{} 近乎相等、真正自洽）；我们的路径损失与 CD 学生处另一端（\cal{} 低至 $0.118$ 但 \raw{} $>2$、峰度 $<3$）；调度采样是最甜的内点。
-这条主线把全文的看似零散的现象统一了起来：优化"两个主导定价的矩"（校准、终端方差为主的损失、一致性蒸馏的方差缩减都在做这件事）必然牺牲"路径级真实性（尤其尾部）"。我们的方法不是要打破这条权衡（事后手段做不到），而是\emph{沿着它给出三个有价值的工作点}：raw 冠军（FM teacher）、平衡冠军（FM+SS）、校准冠军（SIGMA / SIGMA-Base$\to$CD）。
+\subsection{On-policy 修正何以有效}
+Flow-map 学生的结构并非主要瓶颈。朴素 flow-map 一步模型已远优于 CD 与 Mean-Flow，说明其有能力表示 teacher 的联合端点。真正的问题在于条件分布错配：训练条件取自真实转移，部署条件取自学生自身 rollout。On-policy 端点修正把训练条件替换为学生实际访问的状态，再令 teacher 在这些状态上提供端点监督。它既未将目标改为低维价格，也未引入多轮中间 teacher，因而能在 RMSE、终端 $W_1$、杠杆相关与峰度上同时改善——这与可微定价微调“顾此失彼”的指纹形成鲜明对照，说明在状态分布层面对齐是正确的着力点。
 
-\paragraph{校准假象：为什么不能只报一个校准数。}
-期权价格由终端方差主导，故钉住前两阶矩即可把 \cal{} 压到地板以下。我们最激进的一致性学生 \cal{} $0.118$、却 \raw{} $2.33$、峰度仅 $2.85$。它\emph{不是}更好的生成器——是注入两个数据统计量的假象，其糟糕的 \raw{}/峰度即是明证。因此我们主张：\raw{} 与 \cal{} 必须并报，任何低于地板的 \cal{} 仅作诊断。这对金融生成文献是一个方法论提醒——单一校准定价数极易误导。
+\subsection{为何不以可微定价微调作为核心方法}
+期权价格是路径分布的一个低维投影。直接优化 $15$ 个价格点很容易压低 RMSE，但这种改善未必源于更真实的路径。可微定价微调的实验指纹清晰可辨：RMSE 由 $0.179$ 降至 $0.158$，而 Abs-ACF L1 放大约 $10$ 倍、杠杆 L1 放大约 $4$ 倍、峰度被压低至 $3.35$。这表明它更像是把路径分布扭向价格网格，而非修正世界模型的动力学。本文因此只把它作为一个有价值的负面对照，用以论证主方法在路径与状态分布层面建模的必要性。
 
-\paragraph{为什么"借来的思路"在这里成立——一个统一视角。}
-本文用到的外部思路（FM、签名/能量恰当分数、一致性蒸馏）之所以\emph{在我们的设定下}有效，根因是同一个："我们的任务是\emph{低维、连续、需复合很多步}的条件生成。" 低维连续使 FM 的直线输运稳定、易蒸馏；"需复合很多步"使"直线 vs 弯曲""逐点匹配 vs 平均匹配""注入噪声 vs 端点投影"这些原本在单步看不出差别的选择，被\emph{放大成显著的累积差异}——于是 FM$>$DDPM、CD$>$MF/flow-map、CD 甚至$>$teacher（在 cal 上）。签名/能量则因为"金融真实性就是一组路径泛函"而天然契合。换言之，是\emph{任务结构}（复合 + 路径泛函）决定了这些思路的成败，这也是本文最可迁移的洞见。
+\subsection{原始与校准的权衡}
+\label{sec:tradeoff}
+纵观表~\ref{tab:unified}，可以客观地观察到一个稳健的权衡：那些把 \cal{} 压得很低的方法（如 SIGMA-Pin 的 \cal{} $0.180$、若干 CD 学生的 \cal{} $0.170$），其 \raw{} 与峰度往往很差。这并不意味着 \cal{} 无意义——如 \S\ref{sec:rawcal} 所述，矩校准是真实部署中可用的标准后处理，\cal{} 客观地度量了模型经此后处理后的定价可用性。但 \raw{} 与 \cal{} 度量的是不同侧面：一个 \cal{} 很低而 \raw{} 很高的模型，其定价能力主要来自校准注入的两阶矩，而非生成器学到的动力学。本文主张同时报告二者，正是为了把这两个侧面分开看。值得强调的是，joint-FM 与 on-policy flow-map 在校准前就已达到 \raw{} $0.094$ 与 $0.101$，这是它们区别于 SIGMA 与 CD 校准路线的根本之处：它们的定价能力直接来自学到的路径动力学。
 
-\paragraph{校准在真实市场怎么做，以及合成研究为什么有意义。}
-读者会问：\cal{} 用了"真实数据的前两阶矩"，真实市场上做得到吗？做得到，而且这正是业界实践。在真实市场，校准不是去对齐"未来真值"（那不可知），而是对齐\emph{当下可观测的市场信息}：用历史窗口估计收益均值/方差，或更标准地，把模型的隐含波动率\emph{校准到当前期权市场报价}（implied-vol surface）。我们合成实验里的"矩校准"正是这一真实流程的最小化代理。因此 \raw{}/\cal{} 的区分在真实市场\emph{原样成立}：\raw{} 衡量模型\emph{无条件}的内在生成质量，\cal{} 衡量\emph{接入市场报价后}的实用定价能力——二者都重要，但不能用后者冒充前者。
-那么在"真值可知"的合成市场上做研究意义何在？意义恰恰在于：真实市场\emph{没有正确价格标签}，无法判定一个生成器到底好在哪、坏在哪；而合成市场让我们用 MC 预言机得到无偏真值，从而\emph{干净地隔离并证明}几条本身与合成无关的机理——直线输运在长程复合下优于扩散（FM$>$DDPM）、一致性蒸馏的端点投影/方差缩减、严格恰当分数的互补性、以及校准假象的存在性。这些结论是关于\emph{算法与任务结构}的，不依赖数据是否合成，因此可迁移到真实数据；合成只是提供了一个能证伪它们的实验台。这也是本文主张的方法论贡献：先在可控环境证清楚机理，再迁移。
-
-\paragraph{局限。}本文方法改进校准定价但不改进 raw 自洽；事后微调无法二者兼得。我们推测应把恰当评分的路径损失\emph{纳入 teacher 原生训练目标与检查点选择}，而非事后施加。我们也只研究合成市场，向真实微观结构数据的迁移仍是开放问题。
+\subsection{局限与未来工作}
+On-policy 修正仍依赖强 teacher 生成端点标签，训练时需要 GPU 与 NFE120 的 teacher rollout；它亦对早停敏感，训练更久未必更好。两阶段路径上的 SIGMA 微调改善了校准后定价却无法同时改善原始自洽，提示严格正常评分的路径损失应当融入 teacher 的原生训练与检查点选择，而非事后施加。更值得推进的方向包括：将 on-policy 状态回放、正常评分的路径损失与定价感知的验证一并纳入学生训练；训练可在 NFE1、2、4 之间平滑切换的多步 flow-map；以及将同一世界模型与评测协议迁移到真实限价订单簿与股票数据。
 
 % =====================================================================
-\section{结论与展望}
+\section{结论}
 \label{sec:conclusion}
 
-我们提出了一个面向区制切换金融市场的、动作条件、两阶段流匹配\emph{世界模型}，并在其上给出两项贡献：一种\emph{严格恰当的路径分布微调} SIGMA（替代 Quant-GAN 对抗判别器，训练阶段最佳校准 $0.180$，经蒸馏达全局最佳 $0.170$、仍在地板之上），以及一项\emph{系统的蒸馏研究}与机理解释（一致性蒸馏因"端点投影/方差缩减"在校准上超过 teacher，而 Mean-Flow/flow-map 在复合 rollout 下失败）。
-我们诚实的评测——自由 rollout、相对 MC 预言机定价、带显式地板的 \raw{}/\cal{} 区分——揭示了一条贯穿全文的 raw$\leftrightarrow$校准权衡，以及一类被单一校准数掩盖的假象。
-基础 FM teacher 仍是 raw 自洽冠军（$0.475$）；调度采样给出最佳形状平衡（峰度 $4.41$）；我们的方法给出最佳校准定价；一致性蒸馏在不损失保真的前提下让模拟器变便宜。
-
-\paragraph{展望。}（i）把恰当评分路径损失纳入 teacher 原生目标与检查点选择，同时瞄准低 \raw{} 与低 \cal{}；（ii）实现多步一致性采样器；（iii）以架构改动（如对 rollout 施加注意力）直接攻击暴露偏差；（iv）以同一世界模型与评测协议迁移到真实限价订单簿与股票数据。
-
-\paragraph{可复现性。}我们公开全部代码：路径损失微调（\texttt{pathwise\_teacher\_combined.py}）、三种蒸馏（\texttt{distill\_\{consistency,mean\_flow,flow\_map\}.py}）、少步采样器（\texttt{rollout\_fewstep.py}）、评测（\texttt{rollout.py}、\texttt{evaluate\_rollout.py}）、以及计量经济与扩散基线脚本。数据由 \texttt{generate\_heston\_data.py}（QE 格式，种子 $20260530$）与 \texttt{generate\_mc\_oracle.py} 重新生成。
+本文提出一个区制切换 Heston 世界模型，并沿一条递进的路线构造方法：在 GARCH-$t$ 与 Quant-GAN 基线之上，第一阶以两阶段转移流匹配（含调度采样）把 \raw{} 定价 RMSE 降至 $0.475$；进而指出两阶段分解会传播条件误差，提出作为主方法的联合转移流匹配 teacher，在 NFE120 下达到 \raw{} $0.094$。为便于部署，本文提出 on-policy 端点蒸馏，把一步学生从 $0.179$ 推至 $0.101$，逼近多步 teacher 并保持更好的路径结构。对 SIGMA 路径分布微调、可微定价微调，以及 CD 与 Mean-Flow 蒸馏的系统比较表明：单纯压低校准后定价误差不足以保证原始路径质量；对学生 rollout 状态分布做端点蒸馏，才是兼顾保真与一步低成本部署的有效方案。本文的评测协议——自由 rollout、相对 MC oracle 定价，以及 \raw{} 与 \cal{} 的并行报告——同时揭示了一个稳健的原始与校准权衡，可为后续金融世界模型的评测提供参考。
 
 \bibliographystyle{plainnat}
 \bibliography{references}

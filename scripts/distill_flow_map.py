@@ -36,7 +36,8 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from finflow.models import MeanFlowStudent, warm_start_mean_flow_from_fm
 from finflow.training import (
-    TwoStageFMModelConfig, build_vol_datasets, build_ret_datasets, build_batch_loader,
+    TwoStageFMModelConfig, build_vol_datasets, build_ret_datasets, build_joint_datasets,
+    build_batch_loader,
     build_run_dir, load_model_from_checkpoint, load_normalization, load_num_actions,
     resolve_device, save_checkpoint, set_seed, _iterate_batches, _effective_num_batches,
 )
@@ -71,7 +72,7 @@ def parse_args():
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--data-dir", type=Path, required=True)
     p.add_argument("--teacher-checkpoint", type=Path, required=True)
-    p.add_argument("--stage", choices=("vol", "ret"), required=True)
+    p.add_argument("--stage", choices=("vol", "ret", "joint"), required=True)
     p.add_argument("--output-dir", type=Path, required=True)
     p.add_argument("--run-name", type=str, required=True)
     p.add_argument("--epochs", type=int, default=15)
@@ -107,10 +108,28 @@ def main():
     normalization = tck.get("normalization") or load_normalization(a.data_dir)
     delta = float(tck.get("extra", {}).get("lambert_w_delta", 0.0) or 0.0)
 
+    include_prev_return = None
     if a.stage == "vol":
         datasets = build_vol_datasets(a.data_dir, normalization, num_actions, lambert_w_delta=delta)
-    else:
+    elif a.stage == "ret":
         datasets = build_ret_datasets(a.data_dir, normalization, num_actions)
+    else:
+        full_joint_cond = 2 + num_actions
+        markov_minimal_cond = 1 + num_actions
+        if teacher.condition_dim == full_joint_cond:
+            include_prev_return = True
+        elif teacher.condition_dim == markov_minimal_cond:
+            include_prev_return = False
+        else:
+            raise ValueError(
+                "joint teacher condition_dim must be "
+                f"{full_joint_cond} or {markov_minimal_cond}; "
+                f"got {teacher.condition_dim}"
+            )
+        datasets = build_joint_datasets(
+            a.data_dir, normalization, num_actions,
+            include_prev_return=include_prev_return,
+        )
 
     student_config = TwoStageFMModelConfig(
         state_dim=teacher.state_dim, condition_dim=teacher.condition_dim,
@@ -138,7 +157,8 @@ def main():
         "stage": a.stage, "teacher_checkpoint": str(a.teacher_checkpoint), "method": "lagrangian_flowmap",
         "student_config": asdict(student_config), "lambert_w_delta": delta, "warm": warm,
         "epochs": a.epochs, "batch_size": a.batch_size, "lr": a.lr, "boundary_prob": a.boundary_prob,
-        "max_train_batches": a.max_train_batches, "negate_warm_start": a.negate_warm_start}, indent=2), encoding="utf-8")
+        "max_train_batches": a.max_train_batches, "negate_warm_start": a.negate_warm_start,
+        "include_prev_return": include_prev_return}, indent=2), encoding="utf-8")
     n_params = sum(p.numel() for p in student.parameters())
     print(f"[flowmap] stage={a.stage} run={run_dir.name} params={n_params/1e3:.1f}k warm={warm} "
           f"cache={int(a.cache_data_device)} delta={delta} epochs={a.epochs}", flush=True)

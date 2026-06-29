@@ -44,6 +44,7 @@ from finflow.training import (
     _make_progress,
     TensorBatchLoader,
     build_batch_loader,
+    build_joint_datasets,
     build_ret_datasets,
     build_run_dir,
     build_vol_datasets,
@@ -82,6 +83,9 @@ class MeanFlowDistillConfig:
     warm_start: bool = True
     progress: bool = True
     progress_min_interval: float = 0.2
+
+
+DistillStage = Literal["vol", "ret", "joint"]
 
 
 def _sample_r_t(
@@ -380,15 +384,15 @@ def _train_one_epoch_mean_flow(
 def train_mean_flow_distill(
     data_dir: str | Path,
     output_dir: str | Path,
-    stage: Literal["vol", "ret"],
+    stage: DistillStage,
     distill_config: MeanFlowDistillConfig,
     student_config: TwoStageFMModelConfig | None = None,
     run_name: str | None = None,
 ) -> dict[str, Any]:
     """Distill a Mean Flow student from a trained FM teacher."""
 
-    if stage not in ("vol", "ret"):
-        raise ValueError("stage must be 'vol' or 'ret'")
+    if stage not in ("vol", "ret", "joint"):
+        raise ValueError("stage must be 'vol', 'ret', or 'joint'")
     _validate_probability("boundary_prob", float(distill_config.boundary_prob))
     if distill_config.boundary_prob_start is not None:
         _validate_probability("boundary_prob_start", float(distill_config.boundary_prob_start))
@@ -422,10 +426,29 @@ def train_mean_flow_distill(
         )
         expected_state = 1
         expected_cond = 1 + num_actions
-    else:
+    elif stage == "ret":
         datasets = build_ret_datasets(data_dir, normalization, num_actions)
         expected_state = 1
         expected_cond = 3 + num_actions
+    else:
+        full_joint_cond = 2 + num_actions
+        markov_minimal_cond = 1 + num_actions
+        if teacher.condition_dim == full_joint_cond:
+            include_prev_return = True
+        elif teacher.condition_dim == markov_minimal_cond:
+            include_prev_return = False
+        else:
+            raise ValueError(
+                "joint teacher condition_dim must be "
+                f"{full_joint_cond} or {markov_minimal_cond}; "
+                f"got {teacher.condition_dim}"
+            )
+        datasets = build_joint_datasets(
+            data_dir, normalization, num_actions,
+            include_prev_return=include_prev_return,
+        )
+        expected_state = 2
+        expected_cond = full_joint_cond if include_prev_return else markov_minimal_cond
 
     if student_config is None:
         student_config = TwoStageFMModelConfig(

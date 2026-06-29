@@ -1,0 +1,61 @@
+{
+  "run_dir": "/root/autodl-tmp/Heston-Model/runs/experiments/p3_full_parallel/training/joint_distill_0615/cd/joint_cd_ema060_bs4096_e15_0615",
+  "stage": "joint",
+  "num_actions": 3,
+  "student_config": {
+    "state_dim": 2,
+    "condition_dim": 5,
+    "hidden_dim": 512,
+    "time_embedding_dim": 64,
+    "num_blocks": 6
+  },
+  "distill_config": {
+    "teacher_checkpoint": "runs/experiments/p3_full_parallel/training/joint_fm/joint_fm_512x6_bs8192_e60_ad0_lr2e4_ema9999_0613/checkpoints/ema_epoch_060.pt",
+    "batch_size": 4096,
+    "epochs": 15,
+    "lr": 0.0003,
+    "weight_decay": 0.0001,
+    "grad_clip_norm": 1.0,
+    "time_eps": 0.001,
+    "num_workers": 0,
+    "cache_data_device": true,
+    "seed": 1234,
+    "device": "cuda",
+    "max_train_batches": null,
+    "max_val_batches": null,
+    "n_discretization": 18,
+    "ema_decay": 0.999,
+    "warm_start": true,
+    "progress": true,
+    "progress_min_interval": 0.2,
+    "curriculum_kind": "ict",
+    "n_min": 10,
+    "n_max": 160,
+    "huber_c": 0.03,
+    "karras_s0": -2.0,
+    "time_sampling": "lognormal"
+  },
+  "teacher_checkpoint": "/root/autodl-tmp/Heston-Model/runs/experiments/p3_full_parallel/training/joint_fm/joint_fm_512x6_bs8192_e60_ad0_lr2e4_ema9999_0613/checkpoints/ema_epoch_060.pt",
+  "teacher_lambert_w_delta": 0.0,
+  "warm_started_params": 58,
+  "normalization": {
+    "log_v_mean": -3.3005776405334473,
+    "log_v_std": 0.7750805616378784,
+    "return_mean": 7.696966349612921e-05,
+    "return_std": 0.013751840218901634
+  },
+  "data_dir": "/root/autodl-tmp/Heston-Model/runs/experiments/p3_full_parallel/data",
+  "initial_schedule": [
+    0.0010000000474974513,
+    0.10080000758171082,
+    0.2006000131368637,
+    0.3004000186920166,
+    0.4002000093460083,
+    0.5,
+    0.5997999906539917,
+    0.6995999813079834,
+    0.7993999719619751,
+    0.8992000222206116,
+    0.9990000128746033
+  ]
+}

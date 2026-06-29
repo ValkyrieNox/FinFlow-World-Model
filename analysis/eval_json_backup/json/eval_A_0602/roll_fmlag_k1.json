@@ -1,7 +1,0 @@
-{
-  "output": "/root/autodl-tmp/Heston-Model/runs/experiments/p3_full_parallel/eval_A_0602/roll_fmlag_k1.npz",
-  "student_steps": 1,
-  "n_paths": 5000,
-  "calibrate_moments": false,
-  "vol_lambert_w_delta": 0.0
-}

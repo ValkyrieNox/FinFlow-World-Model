@@ -43,3 +43,15 @@ env/
 # Large bundled archives (local-only; extracted contents are committed where small)
 *.tar
 *.tgz
+
+.claude/
+
+# Archived material — superseded experiments, design drafts, scratch scripts,
+# old runs/, server artifacts. Kept locally for reference, not part of the
+# final deliverable (see archive/README.md).
+/archive/
+
+# Released model weights (release/checkpoints/*.pt) are too large for GitHub's
+# 100MB/file limit, so they stay local-only and are delivered separately for
+# the course submission. Their config.json/summary.json (and release/results/)
+# remain tracked. The global *.pt rule above already ignores the weights.

@@ -13,14 +13,14 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from finflow.distillation import MeanFlowDistillConfig, train_mean_flow_distill
-from finflow.training import TwoStageFMModelConfig, load_num_actions
+from finflow.training import TwoStageFMModelConfig, load_checkpoint, load_num_actions
 
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--data-dir", type=Path, default=Path("data/heston_v3"))
     parser.add_argument("--teacher-checkpoint", type=Path, required=True)
-    parser.add_argument("--stage", choices=("vol", "ret"), required=True)
+    parser.add_argument("--stage", choices=("vol", "ret", "joint"), required=True)
     parser.add_argument("--output-dir", type=Path, default=None,
                         help="Default: runs/mf_<stage>_distill")
     parser.add_argument("--run-name", type=str, default=None)
@@ -66,11 +66,18 @@ def main() -> None:
 
     if args.hidden_dim is not None and args.time_embedding_dim is not None and args.num_blocks is not None:
         if args.stage == "vol":
+            state_dim = 1
             condition_dim = 1 + num_actions
-        else:
+        elif args.stage == "ret":
+            state_dim = 1
             condition_dim = 3 + num_actions
+        else:
+            teacher_ckpt = load_checkpoint(args.teacher_checkpoint, map_location="cpu")
+            teacher_model_config = teacher_ckpt["model_config"]
+            state_dim = int(teacher_model_config["state_dim"])
+            condition_dim = int(teacher_model_config["condition_dim"])
         student_config = TwoStageFMModelConfig(
-            state_dim=1,
+            state_dim=state_dim,
             condition_dim=condition_dim,
             hidden_dim=args.hidden_dim,
             time_embedding_dim=args.time_embedding_dim,

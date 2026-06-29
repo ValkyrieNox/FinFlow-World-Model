@@ -75,12 +75,20 @@ def main() -> None:
     if loaded.stage != "joint":
         raise ValueError(f"--checkpoint stage is '{loaded.stage}', expected 'joint'")
     num_actions = loaded.num_actions
-    expected_condition_dim = 2 + num_actions
-    if loaded.sampler.state_dim != 2 or loaded.sampler.condition_dim != expected_condition_dim:
+    full_condition_dim = 2 + num_actions
+    markov_minimal_condition_dim = 1 + num_actions
+    if loaded.sampler.condition_dim == full_condition_dim:
+        include_prev_return = True
+    elif loaded.sampler.condition_dim == markov_minimal_condition_dim:
+        include_prev_return = False
+    else:
+        include_prev_return = None
+    if loaded.sampler.state_dim != 2 or include_prev_return is None:
         raise ValueError(
             "checkpoint is not an action-aware joint transition sampler: "
             f"state_dim={loaded.sampler.state_dim}, "
-            f"condition_dim={loaded.sampler.condition_dim}, expected condition_dim={expected_condition_dim}"
+            f"condition_dim={loaded.sampler.condition_dim}, expected condition_dim="
+            f"{full_condition_dim} or {markov_minimal_condition_dim}"
         )
 
     metadata = load_metadata(args.data_dir) if args.data_dir.exists() else {}
@@ -148,6 +156,7 @@ def main() -> None:
         "checkpoint": str(args.checkpoint),
         "kind": loaded.sampler.kind,
         "transition_type": loaded.checkpoint.get("extra", {}).get("transition_type", "unknown"),
+        "include_prev_return": bool(include_prev_return),
         "initial_v": result.initial_v,
         "initial_s": result.initial_s,
         "normalization": normalization,

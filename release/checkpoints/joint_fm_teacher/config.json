@@ -1,0 +1,55 @@
+{
+  "run_dir": "/root/autodl-tmp/Heston-Model/runs/experiments/p3_full_parallel/training/joint_fm/joint_fm_512x6_bs8192_e60_ad0_lr2e4_ema9999_0613",
+  "stage": "joint",
+  "num_actions": 3,
+  "model_config": {
+    "state_dim": 2,
+    "condition_dim": 5,
+    "hidden_dim": 512,
+    "time_embedding_dim": 64,
+    "num_blocks": 6
+  },
+  "train_config": {
+    "batch_size": 8192,
+    "epochs": 60,
+    "lr": 0.0002,
+    "weight_decay": 0.0001,
+    "grad_clip_norm": 1.0,
+    "time_eps": 0.0001,
+    "num_workers": 0,
+    "cache_data_device": true,
+    "seed": 1234,
+    "device": "cuda",
+    "log_every": 50,
+    "max_train_batches": null,
+    "max_val_batches": null,
+    "progress": true,
+    "progress_min_interval": 0.2,
+    "action_dropout_prob": 0.0,
+    "scheduled_sampling_max_prob": 0.0,
+    "scheduled_sampling_start_epoch": 1,
+    "scheduled_sampling_fm_steps": 20,
+    "save_every_epochs": 5,
+    "lr_schedule": "cosine",
+    "lr_min": 1e-05,
+    "ema_decay": 0.9999
+  },
+  "normalization": {
+    "log_v_mean": -3.3005776405334473,
+    "log_v_std": 0.7750805616378784,
+    "return_mean": 7.696966349612921e-05,
+    "return_std": 0.013751840218901634
+  },
+  "data_dir": "/root/autodl-tmp/Heston-Model/runs/experiments/p3_full_parallel/data",
+  "kind": "fm",
+  "transition_type": "joint_vr",
+  "condition": [
+    "log_v_t",
+    "r_t",
+    "action"
+  ],
+  "target": [
+    "log_v_next",
+    "r_next"
+  ]
+}

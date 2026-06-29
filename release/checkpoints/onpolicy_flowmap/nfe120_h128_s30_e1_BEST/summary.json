@@ -1,0 +1,11 @@
+{
+  "run_dir": "runs/experiments/p3_full_parallel/training/joint_onpolicy_flowmap_0615/joint_flowmap_onpolicy_nfe120_h128_p512_s30_e1_lr5e6_fw1_0615",
+  "stage": "mf_joint",
+  "method": "onpolicy_flowmap_teacher_endpoint",
+  "best_val_endpoint_loss": 1.0820585885085166e-05,
+  "checkpoints": {
+    "best": "runs/experiments/p3_full_parallel/training/joint_onpolicy_flowmap_0615/joint_flowmap_onpolicy_nfe120_h128_p512_s30_e1_lr5e6_fw1_0615/checkpoints/best.pt",
+    "last": "runs/experiments/p3_full_parallel/training/joint_onpolicy_flowmap_0615/joint_flowmap_onpolicy_nfe120_h128_p512_s30_e1_lr5e6_fw1_0615/checkpoints/last.pt"
+  },
+  "total_time_s": 10.273276470601559
+}

@@ -64,7 +64,31 @@ def parse_args() -> argparse.Namespace:
         "--target-loss-weights", nargs="+", type=float, default=None,
         help="optional per-target FM loss weights, e.g. '1 2' for [log_v_next, r_next]",
     )
+    parser.add_argument(
+        "--markov-minimal",
+        action="store_true",
+        help=(
+            "ablation: condition on [log_v_t, action] instead of "
+            "[log_v_t, r_{t-1}, action]"
+        ),
+    )
 
+    parser.add_argument(
+        "--scheduled-sampling-max-prob", type=float, default=0.0,
+        help=(
+            ">0: self-scheduled-sampling. Replace a ramped fraction of each "
+            "row's carried state with the model's own one-step sample from its "
+            "autoregressive parent (closes the teacher-forcing/free-rollout gap)."
+        ),
+    )
+    parser.add_argument(
+        "--scheduled-sampling-start-epoch", type=int, default=1,
+        help="epoch at which scheduled sampling begins ramping from 0",
+    )
+    parser.add_argument(
+        "--scheduled-sampling-fm-steps", type=int, default=20,
+        help="ODE steps for the in-training self-sampler",
+    )
     parser.add_argument("--hidden-dim", type=int, default=128)
     parser.add_argument("--time-embedding-dim", type=int, default=64)
     parser.add_argument("--num-blocks", type=int, default=4)
@@ -76,9 +100,10 @@ def main() -> None:
     num_actions = args.num_actions
     if num_actions is None:
         num_actions = load_num_actions(args.data_dir)
+    include_prev_return = not args.markov_minimal
     model_config = TwoStageFMModelConfig(
         state_dim=2,
-        condition_dim=2 + num_actions,
+        condition_dim=(2 if include_prev_return else 1) + num_actions,
         hidden_dim=args.hidden_dim,
         time_embedding_dim=args.time_embedding_dim,
         num_blocks=args.num_blocks,
@@ -98,6 +123,9 @@ def main() -> None:
         max_train_batches=args.max_train_batches,
         max_val_batches=args.max_val_batches,
         action_dropout_prob=args.action_dropout_prob,
+        scheduled_sampling_max_prob=args.scheduled_sampling_max_prob,
+        scheduled_sampling_start_epoch=args.scheduled_sampling_start_epoch,
+        scheduled_sampling_fm_steps=args.scheduled_sampling_fm_steps,
         save_every_epochs=args.save_every_epochs,
         lr_schedule=args.lr_schedule,
         lr_min=args.lr_min,
@@ -113,6 +141,7 @@ def main() -> None:
         num_actions=num_actions,
         model_config=model_config,
         train_config=train_config,
+        include_prev_return=include_prev_return,
     )
     print(json.dumps(summary, indent=2))
 

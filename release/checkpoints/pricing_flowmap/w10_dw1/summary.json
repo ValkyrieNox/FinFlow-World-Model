@@ -1,0 +1,11 @@
+{
+  "run_dir": "runs/experiments/p3_full_parallel/training/joint_pricing_flowmap_0615/joint_flowmap_pricing_w10_dw1_lr2e5_e3_s24_p512_0615",
+  "stage": "mf_joint",
+  "method": "pricing_aware_flowmap",
+  "best_val_pricing_rmse": 0.34401318430900574,
+  "checkpoints": {
+    "best": "runs/experiments/p3_full_parallel/training/joint_pricing_flowmap_0615/joint_flowmap_pricing_w10_dw1_lr2e5_e3_s24_p512_0615/checkpoints/best.pt",
+    "last": "runs/experiments/p3_full_parallel/training/joint_pricing_flowmap_0615/joint_flowmap_pricing_w10_dw1_lr2e5_e3_s24_p512_0615/checkpoints/last.pt"
+  },
+  "total_time_s": 67.78267153725028
+}

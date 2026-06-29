@@ -1,0 +1,21 @@
+{
+  "stage": "joint",
+  "teacher_checkpoint": "runs/experiments/p3_full_parallel/training/joint_fm/joint_fm_512x6_bs8192_e60_ad0_lr2e4_ema9999_0613/checkpoints/ema_epoch_060.pt",
+  "method": "lagrangian_flowmap",
+  "student_config": {
+    "state_dim": 2,
+    "condition_dim": 5,
+    "hidden_dim": 512,
+    "time_embedding_dim": 64,
+    "num_blocks": 6
+  },
+  "lambert_w_delta": 0.0,
+  "warm": 57,
+  "epochs": 15,
+  "batch_size": 4096,
+  "lr": 0.0003,
+  "boundary_prob": 0.25,
+  "max_train_batches": null,
+  "negate_warm_start": false,
+  "include_prev_return": true
+}

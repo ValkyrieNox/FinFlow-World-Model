@@ -42,6 +42,7 @@ from finflow.training import (
     _make_progress,
     TensorBatchLoader,
     build_batch_loader,
+    build_joint_datasets,
     build_ret_datasets,
     build_run_dir,
     build_vol_datasets,
@@ -83,6 +84,9 @@ class ConsistencyDistillConfig:
     huber_c: float = 0.03
     karras_s0: float = -2.0
     time_sampling: Literal["uniform", "lognormal"] = "lognormal"
+
+
+DistillStage = Literal["vol", "ret", "joint"]
 
 
 def _schedule(n_discretization: int, time_eps: float, device, dtype) -> torch.Tensor:
@@ -289,15 +293,15 @@ def _evaluate_consistency(
 def train_consistency_distill(
     data_dir: str | Path,
     output_dir: str | Path,
-    stage: Literal["vol", "ret"],
+    stage: DistillStage,
     distill_config: ConsistencyDistillConfig,
     student_config: TwoStageFMModelConfig | None = None,
     run_name: str | None = None,
 ) -> dict[str, Any]:
     """Distill a Consistency student from a trained FM teacher."""
 
-    if stage not in ("vol", "ret"):
-        raise ValueError("stage must be 'vol' or 'ret'")
+    if stage not in ("vol", "ret", "joint"):
+        raise ValueError("stage must be 'vol', 'ret', or 'joint'")
     set_seed(distill_config.seed)
 
     device = resolve_device(distill_config.device)
@@ -324,9 +328,28 @@ def train_consistency_distill(
             lambert_w_delta=teacher_lambert_w_delta,
         )
         expected_state, expected_cond = 1, 1 + num_actions
-    else:
+    elif stage == "ret":
         datasets = build_ret_datasets(data_dir, normalization, num_actions)
         expected_state, expected_cond = 1, 3 + num_actions
+    else:
+        full_joint_cond = 2 + num_actions
+        markov_minimal_cond = 1 + num_actions
+        if teacher.condition_dim == full_joint_cond:
+            include_prev_return = True
+        elif teacher.condition_dim == markov_minimal_cond:
+            include_prev_return = False
+        else:
+            raise ValueError(
+                "joint teacher condition_dim must be "
+                f"{full_joint_cond} or {markov_minimal_cond}; "
+                f"got {teacher.condition_dim}"
+            )
+        datasets = build_joint_datasets(
+            data_dir, normalization, num_actions,
+            include_prev_return=include_prev_return,
+        )
+        expected_state = 2
+        expected_cond = full_joint_cond if include_prev_return else markov_minimal_cond
 
     if student_config is None:
         student_config = TwoStageFMModelConfig(
