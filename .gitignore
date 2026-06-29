@@ -15,7 +15,6 @@ venv/
 env/
 
 # Generated data and experiment outputs
-/data/
 /runs/
 /outputs/
 /checkpoints/
@@ -24,6 +23,12 @@ env/
 *.ckpt
 *.npz
 *.npy
+
+# Small canonical Heston dataset (about 9MB) is versioned.
+!/data/
+!/data/heston_v3/
+!/data/heston_v3/*.json
+!/data/heston_v3/*.npz
 
 # Local logs and notebooks
 *.log

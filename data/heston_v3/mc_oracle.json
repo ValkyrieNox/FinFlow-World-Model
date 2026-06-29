@@ -1,0 +1,12 @@
+{
+  "output": "runs/experiments/p3_full_parallel/data/mc_oracle.npz",
+  "data_dir": "runs/experiments/p3_full_parallel/data",
+  "mode": "regime_switching",
+  "n_paths": 100000,
+  "n_steps": 252,
+  "seed": 20260519,
+  "dtype": "float32",
+  "has_actions": true,
+  "s0": 100.0,
+  "dt": 0.003968253968253968
+}

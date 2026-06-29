@@ -51,9 +51,8 @@ tests/                   pytest 测试套件
 data/heston_v3/          数据集（splits + metadata + mc_oracle）
 analysis/                make_figures.py + 论文配图 + 可视化数据
 paper/                   论文源码（main_zh.tex / pdf / references.bib）
-presentation/            课程汇报（pptx / 讲稿）
-release/                 ★ 交付物：终版模型权重 + 关键实验结果
-archive/                 归档：被取代的实验、设计草稿、旧 runs（已 gitignore）
+presentation/            课程汇报（pptx）
+release/                 终版模型权重 + 关键实验结果
 ```
 
 ## 安装
@@ -115,8 +114,6 @@ python3 scripts/evaluate_rollout.py \
 见 [`release/README.md`](release/README.md)。`release/checkpoints/` 含 13 个一步学生检查点（flow-map / CD / Mean-Flow / on-policy×7 / pricing×3），`release/results/` 含对应的原始评测 JSON。
 
 ### 下载与解压权重
-
-权重每个约 112MB，超过 GitHub 100MB/文件上限，故未随仓库提交，改用网盘分发。
 
 > 📦 **下载链接（网盘）**：`<待填写：网盘链接>`
 > 🔑 **提取码**：`<待填写：提取码（如无可删除此行）>`

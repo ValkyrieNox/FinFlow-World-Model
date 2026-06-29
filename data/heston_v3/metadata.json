@@ -1,0 +1,69 @@
+{
+  "n_steps": 252,
+  "split_sizes": {
+    "train": 50000,
+    "val": 5000,
+    "test": 10000
+  },
+  "seed": 1234,
+  "save_transitions": true,
+  "transition_alignment": {
+    "condition": "(v_t, r_{t-1}, a_t) with r_{-1}=0",
+    "target": "(v_{t+1}, r_t)"
+  },
+  "normalization": {
+    "log_v_mean": -3.2954514026641846,
+    "log_v_std": 0.7749020457267761,
+    "return_mean": 7.525199907831848e-05,
+    "return_std": 0.013786595314741135
+  },
+  "v0": 0.04,
+  "s0": 100.0,
+  "dt": 0.003968253968253968,
+  "regime_switching": true,
+  "regimes": [
+    {
+      "name": "normal",
+      "kappa": 2.0,
+      "theta": 0.04,
+      "xi": 0.3,
+      "rho": -0.7,
+      "mu": 0.05
+    },
+    {
+      "name": "high_vol",
+      "kappa": 3.0,
+      "theta": 0.09,
+      "xi": 0.5,
+      "rho": -0.7,
+      "mu": 0.05
+    },
+    {
+      "name": "crash",
+      "kappa": 4.0,
+      "theta": 0.16,
+      "xi": 0.8,
+      "rho": -0.7,
+      "mu": -0.2
+    }
+  ],
+  "transition_matrix": [
+    [
+      0.992,
+      0.006,
+      0.002
+    ],
+    [
+      0.04,
+      0.95,
+      0.01
+    ],
+    [
+      0.05,
+      0.05,
+      0.9
+    ]
+  ],
+  "initial_regime": 0,
+  "num_actions": 3
+}
