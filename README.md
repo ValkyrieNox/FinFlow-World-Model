@@ -114,6 +114,27 @@ python3 scripts/evaluate_rollout.py \
 
 见 [`release/README.md`](release/README.md)。`release/checkpoints/` 含 13 个一步学生检查点（flow-map / CD / Mean-Flow / on-policy×7 / pricing×3），`release/results/` 含对应的原始评测 JSON。
 
+### 下载与解压权重
+
+权重每个约 112MB，超过 GitHub 100MB/文件上限，故未随仓库提交，改用网盘分发。
+
+> 📦 **下载链接（网盘）**：`<待填写：网盘链接>`
+> 🔑 **提取码**：`<待填写：提取码（如无可删除此行）>`
+
+下载到的文件为 `checkpoints.tar.gz`。在仓库根目录解压，即可还原 `release/checkpoints/` 结构：
+
+```bash
+# 1) 把下载到的 checkpoints.tar.gz 放到仓库根目录的 release/ 下
+# 2) 解压（会生成 release/checkpoints/...）
+tar -xzf release/checkpoints.tar.gz -C release/
+
+# 3) 可选：校验完整性（应与 release/checkpoints.tar.gz.sha256 一致）
+sha256sum -c release/checkpoints.tar.gz.sha256
+```
+
+解压后目录结构与 [`release/README.md`](release/README.md) 的索引表一致，例如最优交付件为
+`release/checkpoints/onpolicy_flowmap/nfe120_h128_s30_e1_BEST/best.pt`。
+
 > **注意**：joint-FM teacher 的权重（`ema_epoch_060.pt`）与 Quant-GAN 检查点在当前本地副本中缺失（仅存 `config.json` / `summary.json`），需用上面的训练命令重新生成；其评测结果 JSON 与配置已完整保留在 `release/`。
 
 ## 配图复现

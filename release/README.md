@@ -2,8 +2,19 @@
 
 本目录汇集论文 [`../paper/main_zh.pdf`](../paper/main_zh.pdf) 报告的终版模型权重与对应的原始（raw，未校准）评测结果。所有 RMSE / MAPE 为生成路径上欧式期权价格相对 10 万条 MC oracle 的误差；峰度目标 4.60。
 
-- `checkpoints/` — 一步学生权重（`best.pt` + `config.json` + `summary.json`）。每个 `best.pt` 约 112MB，**超过 GitHub 100MB/文件上限，故未纳入 git，单独随课程作业提交**；其 `config.json` / `summary.json` 已随仓库提交。
+- `checkpoints/` — 一步学生权重（`best.pt` + `config.json` + `summary.json`）。每个 `best.pt` 约 112MB，**超过 GitHub 100MB/文件上限，故未纳入 git，改用网盘分发**；其 `config.json` / `summary.json` 已随仓库提交。
 - `results/`     — 对应评测 JSON（随仓库提交）。`*_metrics.json` 为精简指标，无 `_metrics` 后缀者含完整逐点定价与风格化事实。
+
+### 权重下载与解压
+
+> 📦 **网盘链接**：`<待填写：网盘链接>`　🔑 **提取码**：`<待填写>`
+
+```bash
+tar -xzf release/checkpoints.tar.gz -C release/   # 在仓库根目录解压
+sha256sum -c release/checkpoints.tar.gz.sha256    # 可选：校验完整性
+```
+
+打包文件 `checkpoints.tar.gz` 解压后即还原下表的 `checkpoints/` 结构。
 
 > teacher（`ema_epoch_060.pt`）与 Quant-GAN 权重在本地副本缺失，仅保留其 `config.json` / `summary.json` 与评测 JSON；用 `scripts/train_joint_trans.py` / `scripts/train_quant_gan.py` 可重新生成。
 
