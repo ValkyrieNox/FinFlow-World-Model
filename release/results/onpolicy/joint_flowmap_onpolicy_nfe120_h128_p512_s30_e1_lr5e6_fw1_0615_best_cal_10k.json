@@ -1,0 +1,33 @@
+{
+  "output": "runs/experiments/p3_full_parallel/eval_joint_onpolicy_flowmap_0615/joint_flowmap_onpolicy_nfe120_h128_p512_s30_e1_lr5e6_fw1_0615_best_cal_10k.npz",
+  "n_paths": 10000,
+  "n_steps": 252,
+  "num_actions": 3,
+  "checkpoint": "runs/experiments/p3_full_parallel/training/joint_onpolicy_flowmap_0615/joint_flowmap_onpolicy_nfe120_h128_p512_s30_e1_lr5e6_fw1_0615/checkpoints/best.pt",
+  "kind": "mf",
+  "transition_type": "unknown",
+  "include_prev_return": true,
+  "initial_v": 0.04,
+  "initial_s": 100.0,
+  "normalization": {
+    "log_v_mean": -3.3005776405334473,
+    "log_v_std": 0.7750805616378784,
+    "return_mean": 7.696966349612921e-05,
+    "return_std": 0.013751840218901634
+  },
+  "regime_actions": true,
+  "constant_action": false,
+  "cfg_w": 0.0,
+  "fm_n_steps": 20,
+  "fm_solver": "euler",
+  "calibrate_moments": true,
+  "calibration": {
+    "before_mean": 8.607228959867464e-05,
+    "before_std": 0.01355467874404186,
+    "after_mean": 0.0,
+    "after_std": 1.0,
+    "return_mean": 7.696966349612921e-05,
+    "return_std": 0.013751840218901634
+  },
+  "source_raw_output": "runs/experiments/p3_full_parallel/eval_joint_onpolicy_flowmap_0615/joint_flowmap_onpolicy_nfe120_h128_p512_s30_e1_lr5e6_fw1_0615_best_raw_10k.npz"
+}

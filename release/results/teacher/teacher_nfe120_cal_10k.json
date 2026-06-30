@@ -1,0 +1,9 @@
+{
+  "before_mean": 8.651762231261634e-05,
+  "before_std": 0.013460603117056002,
+  "after_mean": 4.1730287655751914e-18,
+  "after_std": 1.0,
+  "source": "runs/experiments/p3_full_parallel/eval_joint_ema_selector_0613/formal/joint_512_ema_epoch_060_nfe120_raw_10k.npz",
+  "return_mean": 7.696966349612921e-05,
+  "return_std": 0.013751840218901634
+}
