@@ -1,6 +1,6 @@
 # Release — 终版权重与实验结果
 
-本目录汇集论文 [`../paper/main_zh.pdf`](../paper/main_zh.pdf) 报告的终版模型权重与对应的原始（raw，未校准）评测结果。所有 RMSE / MAPE 为生成路径上欧式期权价格相对 10 万条 MC oracle 的误差；峰度目标 4.60。
+本目录汇集论文 [`../paper/Report.pdf`](../paper/Report.pdf) 报告的终版模型权重与对应的原始（raw，未校准）评测结果。所有 RMSE / MAPE 为生成路径上欧式期权价格相对 10 万条 MC oracle 的误差；峰度目标 4.60。
 
 - `checkpoints/` — 一步学生权重（`best.pt` + `config.json` + `summary.json`）。每个 `best.pt` 约 112MB，**超过 GitHub 100MB/文件上限，故未纳入 git，改用网盘分发**；其 `config.json` / `summary.json` 已随仓库提交。
 - `results/`     — 对应评测 JSON（随仓库提交）。`*_metrics.json` 为精简指标，无 `_metrics` 后缀者含完整逐点定价与风格化事实。
