@@ -107,7 +107,7 @@ python3 scripts/evaluate_rollout.py \
   --moneynesses 0.85 0.9 0.95 1.0 1.05 --maturities 0.25 0.5 1.0
 ```
 
-> **raw / cal 两种口径**：`scripts/rollout_calibration.py` 可在生成器输出上施加一次仿射矩校准（与 Quant-GAN 一致），用于报告 `cal` 口径；joint-FM 与 on-policy flow-map 的 raw 口径无需校准即达 0.094 / 0.101。
+> **raw / cal 两种口径**：`scripts/rollout_calibration.py` 可在生成器输出上施加一次仿射矩校准（与 Quant-GAN 一致），用于报告 `cal` 口径；joint-FM 与 on-policy flow-map 的 raw 口径无需校准即达 0.094 / 0.101（矩校准后进一步小幅降至 cal 0.085 / 0.092，见论文表 5 统一对比）。
 
 ## 交付的权重与结果
 

@@ -41,9 +41,9 @@ sha256sum -c release/checkpoints.tar.gz.sha256    # 可选：校验完整性
 
 | 子目录 | 内容 |
 |--------|------|
-| `teacher/` | joint-FM teacher NFE120 评测 + EMA/NFE 选择结果 |
+| `teacher/` | joint-FM teacher NFE120 评测（raw + cal）+ EMA/NFE 选择结果 |
 | `distill/` | flow-map / CD / Mean-Flow 原始评测（表 2） |
-| `onpolicy/` | on-policy 7 个配置的原始评测（表 1/4） |
+| `onpolicy/` | on-policy 7 个配置的 raw 评测（表 1/4），最优 h128 另含 cal 评测 |
 | `pricing/` | 可微定价微调 3 个配置（表 1/3） |
 | `baselines/` | GARCH(1,1)-t、移动块自助、Quant-GAN、DDPM 的 raw/cal 评测 |
 | `two_stage_and_finetune/` | 两阶段 FM + 调度采样、SIGMA 路径分布微调（表 5） |
