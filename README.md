@@ -22,7 +22,7 @@ p_θ(log v_{t+1}, r_t | log v_t, r_{t-1}, a_t)
 | 一步蒸馏对比 | CD / Mean-Flow / flow-map | §4.2.1 | `scripts/distill_consistency.py`, `scripts/distill_mean_flow.py`, `scripts/distill_flow_map.py` |
 | **主蒸馏** | **on-policy teacher-endpoint 修正** | §4.2.2 | `scripts/finetune_flow_map_onpolicy.py` |
 
-## 核心结果（论文表 1，未校准 raw 评测）
+## 核心结果（论文表 1）
 
 | 模型 | RMSE ↓ | MAPE ↓ | 峰度 → 4.60 | 部署 |
 |------|--------|--------|-------------|------|
