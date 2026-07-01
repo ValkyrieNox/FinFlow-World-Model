@@ -93,6 +93,62 @@ def mc_call_prices_grid(
     }
 
 
+def mc_arithmetic_asian_call_prices_grid(
+    s_paths: np.ndarray,
+    *,
+    dt: float,
+    moneynesses: Sequence[float],
+    maturities: Sequence[float],
+    s0: float | None = None,
+    r: float = 0.0,
+) -> dict[str, np.ndarray]:
+    """Monte Carlo arithmetic-Asian call prices on the ``(K, T)`` grid.
+
+    For each maturity, the payoff is ``max(mean(S_1, ..., S_T) - K, 0)``.
+    This uses the full path up to maturity, unlike the European-call evaluator
+    which only uses the terminal value ``S_T``.
+    """
+
+    s_paths = np.asarray(s_paths, dtype=np.float64)
+    if s_paths.ndim != 2:
+        raise ValueError("s_paths must have shape [n_paths, n_steps + 1]")
+    if dt <= 0:
+        raise ValueError("dt must be positive")
+    moneynesses_arr = np.asarray(moneynesses, dtype=np.float64)
+    maturities_arr = np.asarray(maturities, dtype=np.float64)
+    if maturities_arr.ndim != 1 or moneynesses_arr.ndim != 1:
+        raise ValueError("moneynesses and maturities must be 1D")
+
+    s0_resolved = float(s0) if s0 is not None else float(s_paths[0, 0])
+    strikes = s0_resolved * moneynesses_arr
+
+    indices = np.round(maturities_arr / dt).astype(int)
+    max_index = s_paths.shape[1] - 1
+    if (indices < 1).any() or (indices > max_index).any():
+        raise ValueError(
+            f"maturities {maturities_arr.tolist()} (in years) translate to step "
+            f"indices {indices.tolist()}, outside available range [1, {max_index}]"
+        )
+
+    prices = np.zeros((maturities_arr.size, moneynesses_arr.size), dtype=np.float64)
+    stderr = np.zeros_like(prices)
+    n_paths = s_paths.shape[0]
+    for i, idx in enumerate(indices):
+        average_s = s_paths[:, 1 : idx + 1].mean(axis=1)
+        payoff = np.maximum(average_s[:, None] - strikes[None, :], 0.0)
+        discount = float(np.exp(-r * maturities_arr[i]))
+        prices[i] = discount * payoff.mean(axis=0)
+        stderr[i] = discount * payoff.std(axis=0, ddof=0) / np.sqrt(n_paths)
+    return {
+        "strikes": strikes,
+        "maturities": maturities_arr,
+        "moneynesses": moneynesses_arr,
+        "prices": prices,
+        "stderr": stderr,
+        "s0": s0_resolved,
+    }
+
+
 def pricing_rmse_vs_reference(
     mc_prices: np.ndarray,
     reference_prices: np.ndarray,
@@ -186,6 +242,48 @@ def pricing_rmse_vs_mc_oracle(
         r=r,
     )
     oracle = mc_call_prices_grid(
+        oracle_s_paths,
+        dt=dt,
+        moneynesses=moneynesses,
+        maturities=maturities,
+        s0=s0_resolved,
+        r=r,
+    )
+    return pricing_rmse_vs_reference(
+        mc_prices=mc["prices"],
+        reference_prices=oracle["prices"],
+        moneynesses=mc["moneynesses"],
+        maturities=mc["maturities"],
+        strikes=mc["strikes"],
+    )
+
+
+def asian_pricing_rmse_vs_mc_oracle(
+    s_paths: np.ndarray,
+    oracle_s_paths: np.ndarray,
+    *,
+    dt: float,
+    moneynesses: Sequence[float],
+    maturities: Sequence[float],
+    s0: float | None = None,
+    r: float = 0.0,
+) -> PricingComparison:
+    """Compare arithmetic-Asian call MC prices against an MC oracle grid."""
+
+    s_paths = np.asarray(s_paths, dtype=np.float64)
+    oracle_s_paths = np.asarray(oracle_s_paths, dtype=np.float64)
+    if s_paths.ndim != 2 or oracle_s_paths.ndim != 2:
+        raise ValueError("s_paths and oracle_s_paths must have shape [n_paths, n_steps + 1]")
+    s0_resolved = float(s0) if s0 is not None else float(s_paths[0, 0])
+    mc = mc_arithmetic_asian_call_prices_grid(
+        s_paths,
+        dt=dt,
+        moneynesses=moneynesses,
+        maturities=maturities,
+        s0=s0_resolved,
+        r=r,
+    )
+    oracle = mc_arithmetic_asian_call_prices_grid(
         oracle_s_paths,
         dt=dt,
         moneynesses=moneynesses,

@@ -56,6 +56,8 @@ def test_build_full_report_with_mc_oracle_pricing():
     )
     assert "pricing_fake_vs_mc_oracle" in report
     assert "pricing_real_vs_mc_oracle" in report
+    assert "asian_pricing_fake_vs_mc_oracle" in report
+    assert "asian_pricing_real_vs_mc_oracle" in report
 
 
 def test_evaluate_rollout_metadata_dt_reads_single_regime_params():

@@ -6,6 +6,8 @@ from finflow.eval.distances import (
     wasserstein_1d,
 )
 from finflow.eval.pricing import (
+    asian_pricing_rmse_vs_mc_oracle,
+    mc_arithmetic_asian_call_prices_grid,
     mc_call_prices_grid,
     pricing_rmse_vs_carr_madan,
     pricing_rmse_vs_mc_oracle,
@@ -34,6 +36,8 @@ __all__ = [
     "build_full_report",
     "compare_stylized_facts",
     "leverage_correlation",
+    "asian_pricing_rmse_vs_mc_oracle",
+    "mc_arithmetic_asian_call_prices_grid",
     "marginal_wasserstein_curve",
     "mc_call_prices_grid",
     "path_wasserstein",

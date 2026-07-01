@@ -96,6 +96,10 @@ def parse_args() -> argparse.Namespace:
                         default=[0.85, 0.90, 0.95, 1.00, 1.05])
     parser.add_argument("--maturities", nargs="+", type=float,
                         default=[0.25, 0.5, 1.0])
+    parser.add_argument("--asian-moneynesses", nargs="+", type=float, default=None,
+                        help="arithmetic-Asian call moneyness grid; default mirrors --moneynesses")
+    parser.add_argument("--asian-maturities", nargs="+", type=float, default=None,
+                        help="arithmetic-Asian call maturities; default mirrors --maturities")
     parser.add_argument("--pricing-r", type=float, default=None,
                         help="discount rate for MC pricing; default = mu from metadata")
     parser.add_argument("--skip-pricing", action="store_true")
@@ -165,6 +169,8 @@ def main() -> None:
         params=params,
         moneynesses=args.moneynesses,
         maturities=args.maturities,
+        asian_moneynesses=args.asian_moneynesses,
+        asian_maturities=args.asian_maturities,
         dt=dt,
         pricing_r=pricing_r or 0.0,
         signature_depth=args.signature_depth or None,

@@ -12,13 +12,14 @@ FinFlow 将市场建模为动作条件世界模型：外部智能体选择正常
 p_theta(log v_{t+1}, r_t | log v_t, r_{t-1}, a_t)
 ```
 
-并在无教师强制的自由 rollout 下自回归生成一个交易年。主指标为生成路径上的欧式期权价格相对 10 万条 MC oracle 的定价 RMSE。
+并在无教师强制的自由 rollout 下自回归生成一个交易年。主指标为生成路径上的欧式期权价格相对 10 万条 MC oracle 的定价 RMSE；最终报告还补充亚式期权 RMSE 与 17×3 完整价值度曲面检验。
 
 ## 关键结论
 
 - 两阶段转移流匹配能明显优于 GARCH-$t$ 与 Quant-GAN，但方差与收益分阶段建模会在长 rollout 中累积条件误差。
 - joint-FM 将下一方差与下一收益作为联合变量建模，把未校准定价 RMSE 降至 `0.094`。
-- on-policy flow-map 在学生自身 rollout 状态上匹配冻结 teacher 端点，以 NFE1 一步部署达到 RMSE `0.101`，同时保持更接近真实值的峰度与杠杆相关。
+- on-policy flow-map 在学生自身 rollout 状态上匹配冻结 teacher 端点，以 NFE1 一步部署在基础 15 点协议下达到 RMSE `0.101`，同时保持更接近真实值的峰度与杠杆相关。
+- 在 17×3 完整价值度曲面与亚式期权检验下，最终 checkpoint 为 `onpolicy_flowmap/nfe120_h64_s30_e4`，欧式 RMSE `0.0917`，Asian RMSE `0.0525`。
 - 可微定价微调能降低部分价格误差，但会破坏路径动态，因此只作为反例和消融。
 
 ## 核心结果
@@ -31,7 +32,7 @@ p_theta(log v_{t+1}, r_t | log v_t, r_{t-1}, a_t)
 | Pricing-aware flow-map | 0.158 | 0.0174 | 3.350 | NFE1 |
 | **On-policy flow-map** | **0.101** | 0.0110 | 4.356 | **NFE1** |
 
-完整统一对比、三类蒸馏、定价微调和 on-policy 消融见 [paper/Report.pdf](paper/Report.pdf) 表 1--5；原始评测 JSON 位于 [release/results/](release/results/)。
+完整统一对比、三类蒸馏、定价微调和 on-policy 消融见 [paper/Report.pdf](paper/Report.pdf) 表 1--5；正式评测 JSON 与 full-surface 汇总位于 [release/results/](release/results/)。本地运行产生的 `runs/` 是临时实验输出目录，不作为最终交付内容。
 
 ## 方法入口
 
@@ -42,7 +43,7 @@ p_theta(log v_{t+1}, r_t | log v_t, r_{t-1}, a_t)
 | 一步蒸馏 | `scripts/distill_flow_map.py`, `scripts/distill_consistency.py`, `scripts/distill_mean_flow.py` |
 | on-policy 修正 | `scripts/finetune_flow_map_onpolicy.py` |
 | 定价微调 | `scripts/finetune_flow_map_pricing.py` |
-| rollout 与评测 | `scripts/rollout_joint.py`, `scripts/evaluate_rollout.py`, `scripts/rollout_calibration.py` |
+| rollout 与评测 | `scripts/rollout_joint.py`, `scripts/evaluate_rollout.py`, `scripts/evaluate_all_checkpoints_full_surface.sh`, `scripts/rollout_calibration.py` |
 | 配图 | `analysis/make_figures.py` |
 
 ## 项目结构

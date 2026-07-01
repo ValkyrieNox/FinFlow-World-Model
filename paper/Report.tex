@@ -35,7 +35,7 @@
 \maketitle
 
 \begin{abstract}
-本文研究一类金融世界模型：它由外部智能体选择的离散市场区制驱动，并在不使用教师强制的前提下自回归推演一整个交易年。与仅追求收益直方图逼真的金融生成模型不同，世界模型需同时满足可控、自洽与金融保真三项要求；本文以三区制马尔可夫切换 Heston 过程作为可控合成市场，以独立 $100$k 条 MC 路径给出的期权价格作为评测 oracle，并在自由 rollout 下以生成路径上欧式期权价格相对 oracle 的 RMSE 作为主指标。本文沿一条递进的路线构造方法：在经典计量与 GAN 基线之上，第一步以两阶段转移流匹配把单步转移分解为方差与收益两个条件流匹配阶段，并辅以调度采样，已显著优于 GARCH 与 Quant-GAN；进一步指出该分解会在自回归推演中传播条件误差，遂转向 joint-FM 联合转移流匹配，将下一方差与下一收益作为联合变量一次性建模，在 Euler $\nfe{=}120$ 下取得未校准定价 RMSE $0.094$。为获得可部署的一步采样器，本文提出 on-policy 端点蒸馏：令一步 flow-map 学生在其自身 rollout 访问到的状态分布上匹配冻结 teacher 的端点，将一步模型的 RMSE 由 $0.179$ 降至 $0.101$，逼近多步 teacher，同时改善终端收益分布与杠杆相关。本文进一步系统比较了严格正常评分的路径分布微调、可微定价微调，以及一致性蒸馏与 Mean-Flow 等一步蒸馏族，并指出：仅降低校准后定价误差并不足以保证原始路径质量，而对学生 rollout 状态分布做端点蒸馏，是兼顾保真与低成本部署的有效路径。项目代码与实验产物见 \url{https://github.com/ValkyrieNox/finflow-world-model}。
+本文研究一类金融世界模型：它由外部智能体选择的离散市场区制驱动，并在不使用教师强制的前提下自回归推演一整个交易年。与仅追求收益直方图逼真的金融生成模型不同，世界模型需同时满足可控、自洽与金融保真三项要求；本文以三区制马尔可夫切换 Heston 过程作为可控合成市场，以独立 $100$k 条 MC 路径给出的期权价格作为评测 oracle，并在自由 rollout 下以生成路径上欧式期权价格相对 oracle 的 RMSE 作为主指标，同时补充亚式期权 RMSE 与更宽执行价曲面的稳健性检验，以避免只在少量平值附近欧式价格点上得出结论。本文沿一条递进的路线构造方法：在经典计量与 GAN 基线之上，第一步以两阶段转移流匹配把单步转移分解为方差与收益两个条件流匹配阶段，并辅以调度采样，已显著优于 GARCH 与 Quant-GAN；进一步指出该分解会在自回归推演中传播条件误差，遂转向 joint-FM 联合转移流匹配，将下一方差与下一收益作为联合变量一次性建模，在 Euler $\nfe{=}120$ 下取得未校准定价 RMSE $0.094$。为获得可部署的一步采样器，本文提出 on-policy 端点蒸馏：令一步 flow-map 学生在其自身 rollout 访问到的状态分布上匹配冻结 teacher 的端点，将一步模型的 RMSE 由 $0.179$ 降至 $0.101$，逼近多步 teacher，同时改善终端收益分布与杠杆相关。进一步在 $17\times3$ 个欧式与亚式价格点上重新选择 checkpoint 后，最佳一步学生取得欧式 RMSE $0.0917$ 与亚式 RMSE $0.0525$。本文系统比较严格正常评分的路径分布微调、可微定价微调，以及一致性蒸馏与 Mean-Flow 等一步蒸馏族，并指出：仅降低少量欧式价格点或校准后定价误差并不足以保证原始路径质量，而对学生 rollout 状态分布做端点蒸馏，是兼顾保真与低成本部署的有效路径。项目代码与实验产物见 \url{https://github.com/ValkyrieNox/finflow-world-model}。
 \end{abstract}
 
 % =====================================================================
@@ -71,6 +71,7 @@ p_\theta(\log v_{t+1},\,r_t\mid \log v_t,\,r_{t-1},\,a_t),
 \begin{itemize}\itemsep2pt
 \item 本文先以两阶段转移流匹配及调度采样超越 GARCH-$t$ 与 Quant-GAN 基线，再提出联合转移流匹配 teacher，从架构上消除两阶段间的条件误差传播，在自由 rollout 下取得 \raw{} 定价 RMSE $0.094$。
 \item 本文提出 on-policy 端点蒸馏，令一步学生在其自身 rollout 状态分布上匹配冻结 teacher 的端点，将一步学生由 $0.179$ 推至 $0.101$，并在保留终端 $W_1$、Abs-ACF、杠杆相关与峰度等路径结构的同时实现 NFE1 部署。
+\item 本文在原有 $15$ 点欧式协议外补充亚式期权与 $17\times3$ 完整价值度曲面评测，发现窄欧式协议下的最优 checkpoint 并非完整曲面下的最优；在更严格协议下，NFE120/h64/s30/e4 学生达到欧式 RMSE $0.0917$ 与亚式 RMSE $0.0525$。
 \item 本文将 SIGMA 路径分布微调、可微定价微调，与 CD、Mean-Flow、flow-map 三类蒸馏置于统一协议下评测，并与 Quant-GAN、GARCH(1,1)-$t$、移动块自助法对照，刻画出原始与校准之间的权衡，说明优化低维定价目标的风险。
 \end{itemize}
 
@@ -224,7 +225,7 @@ x_\tau=(1-\tau)\,x_0+\tau\,x_1,\qquad \tau\sim U[0,1],
 =\left\|F_\phi(z,c_{\mathrm{op}})-T(z,c_{\mathrm{op}})\right\|_2^2
 +\lambda_{\mathrm{fm}}\,\mathcal L_{\mathrm{flowmap}} .
 \end{equation}
-该模型在部署时仍为一步学生；teacher 只在训练阶段提供端点标签，不进入部署，因而不增加任何推理成本。与 CD 等多轮 progressive distillation 不同，on-policy 端点修正不引入中间 teacher，也不把目标改成低维价格，而是同时在“学生实际访问的状态分布”和“teacher 的高质量端点”两处对齐，从而既弥合曝光偏差、又不破坏路径动力学。最优配置为 teacher $\nfe{=}120$、on-policy horizon 128、每次 512 条路径、30 个 update step、1 个 epoch、学习率 $5\times10^{-6}$、flow-map 正则权重 1。该修正把一步学生的定价 RMSE 由 $0.179$ 降至 $0.101$，逼近多步 teacher，构成本文最终交付的可部署采样器。
+该模型在部署时仍为一步学生；teacher 只在训练阶段提供端点标签，不进入部署，因而不增加任何推理成本。与 CD 等多轮 progressive distillation 不同，on-policy 端点修正不引入中间 teacher，也不把目标改成低维价格，而是同时在“学生实际访问的状态分布”和“teacher 的高质量端点”两处对齐，从而既弥合曝光偏差、又不破坏路径动力学。在基础 $15$ 点欧式协议下，teacher $\nfe{=}120$、on-policy horizon 128、每次 512 条路径、30 个 update step、1 个 epoch、学习率 $5\times10^{-6}$、flow-map 正则权重 1 的配置把一步学生的定价 RMSE 由 $0.179$ 降至 $0.101$。但该窄协议主要考察平值附近欧式价格；在后续 $17\times3$ 完整价值度曲面与亚式期权检验中，最佳 checkpoint 转为 NFE120/h64/s30/e4。这说明 on-policy 训练配置的最终选择应由更宽的衍生品曲面与路径质量共同决定，而非只看少量欧式价格点。
 
 % =====================================================================
 \section{实验}
@@ -259,72 +260,72 @@ On-policy flow-map & \best{0.1010} & 0.0110 & \best{0.0052} & \best{0.00028} & 0
 
 \subsection{三类一步蒸馏方法比较}
 \label{sec:res_distill}
-在 joint-FM teacher 上，本文比较 CD、Mean-Flow 与 flow-map 三类一步蒸馏，结果见表~\ref{tab:distill_joint}。三者差异较大：CD 在此设置下 RMSE 为 $0.447$，Mean-Flow 为 $2.292$，均落后于基础 flow-map 的 $0.179$。原因在于优化目标与本文诉求的匹配程度：joint-FM 的训练目标是把噪声直接输运到联合端点 $x_1=(\log v_{t+1},r_t)$，而 flow-map 直接以该端点为学习对象，参数化更为匹配；CD 约束的是沿 ODE 的不变性、Mean-Flow 回归的是时间平均速度，二者都要在长复合 rollout 中把局部一致性累积成全局端点精度，误差更易放大。Mean-Flow 的 RMSE 增至 $2.292$，反映了这种累积偏差的影响。这一比较说明本文后续所有 pricing-aware 与 on-policy 修正均建立在 flow-map 之上，而非 CD 或 Mean-Flow。
+在 joint-FM teacher 上，本文比较 CD、Mean-Flow 与 flow-map 三类一步蒸馏，结果见表~\ref{tab:distill_joint}。该表保留基础 $15$ 点欧式协议下的全部原始指标，并额外加入同一 moneyness--maturity 网格上的亚式期权 RMSE，用于检查路径平均 payoff。三者差异较大：CD 的欧式 RMSE 为 $0.447$、亚式 RMSE 为 $0.274$，Mean-Flow 的欧式 RMSE 为 $2.292$、亚式 RMSE 为 $0.970$，均落后于基础 flow-map 的欧式 RMSE $0.179$ 与亚式 RMSE $0.052$。原因在于优化目标与本文诉求的匹配程度：joint-FM 的训练目标是把噪声直接输运到联合端点 $x_1=(\log v_{t+1},r_t)$，而 flow-map 直接以该端点为学习对象，参数化更为匹配；CD 约束的是沿 ODE 的不变性、Mean-Flow 回归的是时间平均速度，二者都要在长复合 rollout 中把局部一致性累积成全局端点精度，误差更易放大。这一比较说明本文后续所有 pricing-aware 与 on-policy 修正均建立在 flow-map 之上，而非 CD 或 Mean-Flow。
 
 \begin{table}[t]
 \centering
-\caption{Joint-FM teacher 上的三种一步蒸馏。Flow-map 是表现最好的初始学生，因此后续 pricing-aware 与 on-policy 均只在 flow-map 上进行。}
+\caption{Joint-FM teacher 上的三种一步蒸馏。欧式指标沿用基础 $15$ 点协议；Asian RMSE 使用同一 moneyness--maturity 网格的算术平均亚式看涨 payoff。Flow-map 是表现最好的初始学生，因此后续 pricing-aware 与 on-policy 均只在 flow-map 上进行。}
 \label{tab:distill_joint}
 \tablebodysetup
-\begin{tabular}{l c c c c c c c}
+\begin{tabular}{l c c c c c c c c}
 \toprule
-一步学生 & RMSE $\downarrow$ & MAPE $\downarrow$ & $W_1(R_T)$ $\downarrow$ & 边际 $W_1$ $\downarrow$ & Abs-ACF L1 $\downarrow$ & Lev L1 $\downarrow$ & 峰度 $\to4.60$ \\
+一步学生 & RMSE $\downarrow$ & MAPE $\downarrow$ & Asian RMSE $\downarrow$ & $W_1(R_T)$ $\downarrow$ & 边际 $W_1$ $\downarrow$ & Abs-ACF L1 $\downarrow$ & Lev L1 $\downarrow$ & 峰度 $\to4.60$ \\
 \midrule
-CD & 0.447 & 0.0361 & 0.0113 & 0.00037 & 0.0072 & 0.00235 & 4.028 \\
-Mean-Flow & 2.292 & 0.1929 & 0.0406 & 0.00164 & 0.0046 & 0.00569 & 4.624 \\
-Flow-map & \best{0.179} & \best{0.0145} & \best{0.0131} & \best{0.00051} & \best{0.0042} & \best{0.00212} & 5.974 \\
+CD & 0.447 & 0.0361 & 0.274 & 0.0113 & 0.00037 & 0.0072 & 0.00235 & 4.028 \\
+Mean-Flow & 2.292 & 0.1929 & 0.970 & 0.0406 & 0.00164 & 0.0046 & 0.00569 & 4.624 \\
+Flow-map & \best{0.179} & \best{0.0145} & \best{0.052} & \best{0.0131} & \best{0.00051} & \best{0.0042} & \best{0.00212} & 5.974 \\
 \bottomrule
 \end{tabular}
 \end{table}
 
 \subsection{可微定价微调的路径退化效应}
 \label{sec:res_pricing}
-表~\ref{tab:pricing} 展示 pricing-aware flow-map 可微定价微调的三个配置，并验证了 \S\ref{sec:diffprice} 中关于低维定价目标的担忧。最优定价配置为 $w{=}10,\lambda_{\mathrm{dyn}}{=}0.2$，RMSE 为 $0.158$，低于基础 flow-map 的 $0.179$；但代价是它把 Abs-ACF L1 由 $0.0042$ 提高至 $0.0430$，约为原来的 $10$ 倍；杠杆相关由 $0.0021$ 提高至 $0.0089$，约为原来的 $4$ 倍；峰度由 $5.97$ 降低至 $3.35$。更激进的配置，即 $\lambda_{\mathrm{dyn}}{=}1.0$ 或 $w{=}30$，还会使 RMSE 升高到 $0.365$ 和 $0.747$，说明强行对齐价格网格会破坏 rollout 的稳定性。这组消融表明，直接对 $15$ 个价格点求导可能使学生过拟合价格的低维统计量，并扭曲路径动力学，而非学习真实的转移结构。该结果从反面论证了本文选择在状态分布层面做 on-policy 端点修正，而不是在定价目标上做微调。
+表~\ref{tab:pricing} 展示 pricing-aware flow-map 可微定价微调的三个配置，并验证了 \S\ref{sec:diffprice} 中关于低维定价目标的担忧。最优欧式定价配置为 $w{=}10,\lambda_{\mathrm{dyn}}{=}0.2$，欧式 RMSE 为 $0.158$，低于基础 flow-map 的 $0.179$；但其亚式 RMSE 从基础 flow-map 的 $0.052$ 升至 $0.092$，同时 Abs-ACF L1 由 $0.0042$ 提高至 $0.0430$、杠杆相关由 $0.0021$ 提高至 $0.0089$、峰度由 $5.97$ 降低至 $3.35$。更激进的配置，即 $\lambda_{\mathrm{dyn}}{=}1.0$ 或 $w{=}30$，不仅欧式 RMSE 升高到 $0.365$ 和 $0.747$，亚式 RMSE 也进一步恶化到 $0.189$ 和 $0.385$。这组消融表明，直接对 $15$ 个欧式价格点求导可能使学生过拟合价格的低维统计量，并扭曲路径动力学，而非学习真实的转移结构。该结果从反面论证了本文选择在状态分布层面做 on-policy 端点修正，而不是在定价目标上做微调。
 
 \begin{table}[t]
 \centering
-\caption{可微定价微调消融。该方法能降低 RMSE，但会系统性破坏路径动态，因此未作为核心方法。}
+\caption{可微定价微调消融。欧式指标沿用基础 $15$ 点协议；Asian RMSE 使用同一 moneyness--maturity 网格。该方法能降低局部欧式 RMSE，但会系统性破坏路径动态，并不能改善路径依赖 payoff。}
 \label{tab:pricing}
 \tablebodysetup
-\begin{tabular}{l c c c c c c}
+\begin{tabular}{l c c c c c c c}
 \toprule
-配置 & RMSE $\downarrow$ & MAPE $\downarrow$ & $W_1(R_T)$ $\downarrow$ & 边际 $W_1$ $\downarrow$ & Abs-ACF L1 $\downarrow$ & Lev L1 $\downarrow$ \\
+配置 & RMSE $\downarrow$ & MAPE $\downarrow$ & Asian RMSE $\downarrow$ & $W_1(R_T)$ $\downarrow$ & 边际 $W_1$ $\downarrow$ & Abs-ACF L1 $\downarrow$ & Lev L1 $\downarrow$ \\
 \midrule
-基础 flow-map & 0.179 & \best{0.0145} & \best{0.0131} & \best{0.00051} & \best{0.0042} & \best{0.0021} \\
-$w{=}10,\lambda_{\mathrm{dyn}}{=}0.2$ & \best{0.158} & 0.0174 & 0.0236 & 0.00080 & 0.0430 & 0.0089 \\
-$w{=}10,\lambda_{\mathrm{dyn}}{=}1.0$ & 0.365 & 0.0453 & 0.0316 & 0.00178 & 0.0368 & 0.0068 \\
-$w{=}30,\lambda_{\mathrm{dyn}}{=}0.1$ & 0.747 & 0.0730 & 0.0320 & 0.00150 & 0.0435 & 0.0101 \\
+基础 flow-map & 0.179 & \best{0.0145} & \best{0.052} & \best{0.0131} & \best{0.00051} & \best{0.0042} & \best{0.0021} \\
+$w{=}10,\lambda_{\mathrm{dyn}}{=}0.2$ & \best{0.158} & 0.0174 & 0.092 & 0.0236 & 0.00080 & 0.0430 & 0.0089 \\
+$w{=}10,\lambda_{\mathrm{dyn}}{=}1.0$ & 0.365 & 0.0453 & 0.189 & 0.0316 & 0.00178 & 0.0368 & 0.0068 \\
+$w{=}30,\lambda_{\mathrm{dyn}}{=}0.1$ & 0.747 & 0.0730 & 0.385 & 0.0320 & 0.00150 & 0.0435 & 0.0101 \\
 \bottomrule
 \end{tabular}
 \end{table}
 
 \subsection{On-policy 端点修正的消融分析}
 \label{sec:res_onpolicy}
-表~\ref{tab:onpolicy_ablation} 给出 on-policy 端点修正的主要扫描，刻画了该方法对各超参数的敏感性。最佳结果来自 teacher NFE120、horizon 128、30 个 update step、1 个 epoch 与学习率 $5\times10^{-6}$，对应 RMSE 为 $0.101$。结果显示三点。其一，teacher 端点质量至关重要：当 teacher 仅以 NFE30 提供标签时，首行配置的 RMSE 增至 $0.347$，说明 on-policy 状态回放必须配合高质量端点才能见效。其二，方法对 rollout 规模并不极端敏感：horizon 由 128 减到 64 时 RMSE 仅由 $0.101$ 升至 $0.103$，说明无需较长的 on-policy 视野即可覆盖学生访问的状态分布。其三，增加微调轮数并不一定改善结果：固定其余配置，把 epoch 从 1 增到 2、4，RMSE 由 $0.103$ 单调劣化到 $0.115$、$0.133$。这表明端点 L2 loss 并不是 oracle 定价 RMSE 的单调代理——过度拟合 teacher 端点会偏离定价指标，因此必须借助外部评测早停。这一现象也与 \S\ref{sec:res_pricing} 的结果一致：训练目标与评测指标之间存在差异，盲目降低训练损失并不安全。
+表~\ref{tab:onpolicy_ablation} 给出 on-policy 端点修正 checkpoint 在更严格评测下的扫描。与前两张表不同，此处使用 $17\times3$ 的欧式完整价值度曲面，并在同一网格上加入亚式期权；moneyness 覆盖 $0.50$ 到 $2.00$，因此更关注深度实值与深度虚值区域的尾部定价。结果显示三点。其一，NFE120 teacher 提供的端点质量仍然关键：NFE30/h64/s60/e4 虽有较低亚式 RMSE，但边际 $W_1$、绝对收益 $W_1$ 与签名 $W_1$ 明显变差。其二，在完整曲面下，最佳 checkpoint 不再是基础 $15$ 点协议选出的 NFE120/h128/s30/e1，而是 NFE120/h64/s30/e4，其欧式 RMSE 为 $0.0917$、亚式 RMSE 为 $0.0525$，同时取得最低签名 $W_1$。其三，旧 BEST 仍有最优边际 $W_1$，但在完整 strike surface 与路径依赖 payoff 上不再最优，说明最终模型选择不能只依赖少量平值附近欧式价格点。
 
 \begin{table}[t]
 \centering
-\caption{On-policy flow-map 消融。主配置为 NFE120/h128/s30/e1；所有配置均为一步模型。}
+\caption{On-policy flow-map 在 $17\times3$ 完整价值度曲面与亚式期权上的消融。所有配置均为一步模型；欧式与亚式 RMSE 均相对同一 $100$k MC oracle 计算。}
 \label{tab:onpolicy_ablation}
 \tablebodysetup
-\begin{tabular}{l c c c c c c c}
+\begin{tabular}{l c c c c c c}
 \toprule
-配置 & RMSE $\downarrow$ & MAPE $\downarrow$ & $W_1(R_T)$ $\downarrow$ & 边际 $W_1$ $\downarrow$ & Abs-ACF L1 $\downarrow$ & Lev L1 $\downarrow$ & 峰度 $\to4.60$ \\
+配置 & 欧式 RMSE $\downarrow$ & Asian RMSE $\downarrow$ & 边际 $W_1$ $\downarrow$ & $W_1(R_T)$ $\downarrow$ & $W_1(|R_T|)$ $\downarrow$ & Sig-$W_1$ $\downarrow$ \\
 \midrule
-NFE30/h64/s60/e4 & 0.347 & 0.0403 & 0.0130 & 0.00057 & 0.0071 & \best{0.00074} & 4.244 \\
-NFE120/h64/s15/e1 & 0.111 & 0.0131 & 0.0056 & 0.00029 & 0.0045 & 0.00086 & \best{4.413} \\
-NFE120/h64/s30/e1 & 0.103 & 0.0114 & 0.0056 & 0.00029 & 0.0052 & 0.00089 & 4.338 \\
-NFE120/h64/s30/e2 & 0.115 & 0.0131 & \best{0.0052} & 0.00029 & 0.0044 & 0.00091 & 4.356 \\
-NFE120/h64/s30/e4 & 0.133 & 0.0155 & 0.0057 & 0.00029 & 0.0042 & 0.00087 & 4.402 \\
-NFE120/h128/s30/e1 & \best{0.101} & \best{0.0110} & 0.0052 & \best{0.00028} & 0.0047 & 0.00086 & 4.356 \\
-NFE120/h252/s30/e1 & 0.105 & 0.0113 & 0.0066 & 0.00029 & \best{0.0037} & 0.00086 & 4.414 \\
+NFE30/h64/s60/e4 & 0.1322 & 0.0545 & 0.000623 & 0.00810 & 0.1474 & 0.00223 \\
+NFE120/h64/s15/e1 & 0.1132 & 0.0694 & 0.000300 & 0.00477 & 0.0450 & 0.00117 \\
+NFE120/h64/s30/e1 & 0.1331 & 0.0760 & 0.000294 & 0.00528 & 0.0505 & 0.00127 \\
+NFE120/h64/s30/e2 & 0.1071 & 0.0598 & 0.000293 & 0.00470 & 0.0433 & 0.00117 \\
+NFE120/h64/s30/e4 & \best{0.0917} & \best{0.0525} & 0.000299 & \best{0.00449} & 0.0437 & \best{0.00111} \\
+NFE120/h128/s30/e1 & 0.1416 & 0.0787 & \best{0.000287} & 0.00534 & 0.0438 & 0.00129 \\
+NFE120/h252/s30/e1 & 0.1622 & 0.0948 & 0.000301 & 0.00626 & \best{0.0428} & 0.00142 \\
 \bottomrule
 \end{tabular}
 \end{table}
 
 \subsection{与基线及其他方法的统一对比}
 \label{sec:res_baselines}
-表~\ref{tab:unified} 把所有学习型方法与经典基线置于同一 \raw{}、\cal{} 与峰度坐标下进行比较。可以得到如下观察。其一，沿本文的递进路线，\raw{} 定价误差逐步降低：基线层面 Quant-GAN 为 $5.4$--$5.7$、GARCH-$t$ 为 $1.089$；第一阶优化的两阶段流匹配将该误差降至 $0.475$；联合的 joint-FM teacher 进一步降到 $0.094$，一步 on-policy flow-map 为 $0.101$。这一单调下降趋势量化了本文方法路线的收益。其二，关于 \raw{} 与 \cal{} 的对照：joint-FM 与 on-policy flow-map 不依赖矩校准，其 \raw{} 已分别达到 $0.094$ 与 $0.101$，矩校准后仅小幅降至 $0.085$ 与 $0.092$；相比之下，SIGMA 路径分布微调与若干 CD 学生能把 \cal{} 降到 $0.170$--$0.180$，但它们的 \raw{} 高达 $1.9$--$2.6$、峰度降至 $3.1$--$3.6$。这说明这些方法的定价可用性主要来自矩校准这一标准后处理，其生成器本身的路径保真度并不高；而本文的联合方法在校准前就已具备定价能力。其三，移动块自助法虽有较低的 \raw{} 定价误差 $0.269$ 和接近真实值的峰度 $4.58$，但它仅重放真实收益块，属于非参数化重采样参照，既不可控，也无法外推到未见情景，因此是参照而非可比的生成器。其四，GARCH-$t$ 的 \raw{} 定价误差低于若干深度基线，这主要源于它对无条件方差的刻画；但其峰度膨胀至 $19.2$ 且无区制控制，再次说明良好的定价与良好的路径真实性是两个相互独立的维度——这也是本文坚持同时报告定价与多项路径统计的原因。
+表~\ref{tab:unified} 沿用基础 $15$ 点欧式协议，把所有学习型方法与经典基线置于同一 \raw{}、\cal{} 与峰度坐标下进行比较；亚式期权作为对一步学生和 pricing-aware 微调的补充诊断见表~\ref{tab:distill_joint}--\ref{tab:pricing}，完整价值度曲面的 checkpoint 选择见表~\ref{tab:onpolicy_ablation}。可以得到如下观察。其一，沿本文的递进路线，\raw{} 定价误差逐步降低：基线层面 Quant-GAN 为 $5.4$--$5.7$、GARCH-$t$ 为 $1.089$；第一阶优化的两阶段流匹配将该误差降至 $0.475$；联合的 joint-FM teacher 进一步降到 $0.094$，一步 on-policy flow-map 为 $0.101$。这一单调下降趋势量化了本文方法路线的收益。其二，关于 \raw{} 与 \cal{} 的对照：joint-FM 与 on-policy flow-map 不依赖矩校准，其 \raw{} 已分别达到 $0.094$ 与 $0.101$，矩校准后仅小幅降至 $0.085$ 与 $0.092$；相比之下，SIGMA 路径分布微调与若干 CD 学生能把 \cal{} 降到 $0.170$--$0.180$，但它们的 \raw{} 高达 $1.9$--$2.6$、峰度降至 $3.1$--$3.6$。这说明这些方法的定价可用性主要来自矩校准这一标准后处理，其生成器本身的路径保真度并不高；而本文的联合方法在校准前就已具备定价能力。其三，移动块自助法虽有较低的 \raw{} 定价误差 $0.269$ 和接近真实值的峰度 $4.58$，但它仅重放真实收益块，属于非参数化重采样参照，既不可控，也无法外推到未见情景，因此是参照而非可比的生成器。其四，GARCH-$t$ 的 \raw{} 定价误差低于若干深度基线，这主要源于它对无条件方差的刻画；但其峰度膨胀至 $19.2$ 且无区制控制，再次说明良好的定价与良好的路径真实性是两个相互独立的维度——这也是本文坚持同时报告定价与多项路径统计的原因。
 
 \begin{table}[t]
 \centering
@@ -362,10 +363,10 @@ NFE120/h252/s30/e1 & 0.105 & 0.0113 & 0.0066 & 0.00029 & \best{0.0037} & 0.00086
 \label{sec:discussion}
 
 \subsection{On-policy 修正的作用机制}
-Flow-map 学生的结构并非主要瓶颈。基础 flow-map 一步模型已显著优于 CD 与 Mean-Flow，说明其有能力表示 teacher 的联合端点。主要问题在于条件分布错配：训练条件取自真实转移，部署条件取自学生自身 rollout。On-policy 端点修正把训练条件替换为学生实际访问的状态，再令 teacher 在这些状态上提供端点监督。它既未将目标改为低维价格，也未引入多轮中间 teacher，因而能在 RMSE、终端 $W_1$、杠杆相关与峰度上同时改善；这与可微定价微调形成对照，说明在状态分布层面对齐是更合适的优化方向。
+Flow-map 学生的结构并非主要瓶颈。基础 flow-map 一步模型已显著优于 CD 与 Mean-Flow，且在新增亚式 RMSE 上同样优于二者，说明其有能力表示 teacher 的联合端点并保留较好的路径平均 payoff。主要问题在于条件分布错配：训练条件取自真实转移，部署条件取自学生自身 rollout。On-policy 端点修正把训练条件替换为学生实际访问的状态，再令 teacher 在这些状态上提供端点监督。它既未将目标改为低维价格，也未引入多轮中间 teacher，因而能在 RMSE、终端 $W_1$、杠杆相关与峰度上同时改善；在完整价值度曲面下，它还改变了最终 checkpoint 的选择，说明状态分布对齐的收益不能只用少量平值欧式价格点衡量。
 
 \subsection{可微定价微调的局限性}
-期权价格是路径分布的一个低维投影。直接优化 $15$ 个价格点可以降低 RMSE，但这种改善不一定源于更真实的路径。可微定价微调的实验结果显示：RMSE 由 $0.179$ 降至 $0.158$，而 Abs-ACF L1 放大约 $10$ 倍、杠杆 L1 放大约 $4$ 倍、峰度降低至 $3.35$。这表明该方法更倾向于将路径分布调向价格网格，而非修正世界模型的动力学。本文因此只把它作为一个负面对照，用以论证在路径与状态分布层面建模的必要性。
+期权价格是路径分布的一个低维投影。直接优化 $15$ 个欧式价格点可以降低局部 RMSE，但这种改善不一定源于更真实的路径。可微定价微调的实验结果显示：RMSE 由 $0.179$ 降至 $0.158$，而 Asian RMSE 从 $0.052$ 升至 $0.092$，Abs-ACF L1 放大约 $10$ 倍、杠杆 L1 放大约 $4$ 倍、峰度降低至 $3.35$。这表明该方法更倾向于将路径分布调向训练价格网格，而非修正世界模型的动力学；当 payoff 需要路径平均信息时，这种捷径更容易暴露。本文因此只把它作为一个负面对照，用以论证在路径与状态分布层面建模的必要性。
 
 \subsection{原始与校准的权衡}
 \label{sec:tradeoff}
@@ -378,7 +379,7 @@ On-policy 修正仍依赖高质量 teacher 生成端点标签，训练时需要 
 \section{结论}
 \label{sec:conclusion}
 
-本文提出一个区制切换 Heston 世界模型，并沿一条递进的路线构造方法：在 GARCH-$t$ 与 Quant-GAN 基线之上，第一阶以两阶段转移流匹配及调度采样把 \raw{} 定价 RMSE 降至 $0.475$；进而指出两阶段分解会传播条件误差，提出联合转移流匹配 teacher，在 NFE120 下达到 \raw{} $0.094$。为便于部署，本文提出 on-policy 端点蒸馏，把一步学生从 $0.179$ 改善至 $0.101$，逼近多步 teacher 并保持更好的路径结构。对 SIGMA 路径分布微调、可微定价微调，以及 CD 与 Mean-Flow 蒸馏的系统比较表明：仅降低校准后定价误差不足以保证原始路径质量；对学生 rollout 状态分布做端点蒸馏，是兼顾保真与一步低成本部署的有效方案。本文的评测协议——自由 rollout、相对 MC oracle 定价，以及 \raw{} 与 \cal{} 的并行报告——同时揭示了一个稳健的原始与校准权衡，可为后续金融世界模型的评测提供参考。
+本文提出一个区制切换 Heston 世界模型，并沿一条递进的路线构造方法：在 GARCH-$t$ 与 Quant-GAN 基线之上，第一阶以两阶段转移流匹配及调度采样把 \raw{} 定价 RMSE 降至 $0.475$；进而指出两阶段分解会传播条件误差，提出联合转移流匹配 teacher，在 NFE120 下达到 \raw{} $0.094$。为便于部署，本文提出 on-policy 端点蒸馏，把一步学生从 $0.179$ 改善至 $0.101$，逼近多步 teacher 并保持更好的路径结构。进一步加入亚式期权后，基础 flow-map 仍是三类一步蒸馏中最稳健的初始学生，而 pricing-aware 微调暴露出优化少量欧式价格点的局限；在 $17\times3$ 完整价值度曲面与亚式期权下，最终 checkpoint 选择从窄协议下的 NFE120/h128/s30/e1 转为 NFE120/h64/s30/e4，达到欧式 RMSE $0.0917$ 与 Asian RMSE $0.0525$。对 SIGMA 路径分布微调、可微定价微调，以及 CD 与 Mean-Flow 蒸馏的系统比较表明：仅降低少量欧式价格点或校准后定价误差不足以保证原始路径质量；对学生 rollout 状态分布做端点蒸馏，是兼顾保真与一步低成本部署的有效方案。本文的评测协议——自由 rollout、相对 MC oracle 定价、亚式期权与完整价值度曲面稳健性检验，以及 \raw{} 与 \cal{} 的并行报告——同时揭示了一个稳健的原始与校准权衡，可为后续金融世界模型的评测提供参考。
 
 \bibliographystyle{plainnat}
 \bibliography{references}

@@ -10,6 +10,7 @@ from finflow.data import HestonParams
 from finflow.eval.distances import marginal_wasserstein_curve, path_wasserstein
 from finflow.eval.pricing import (
     PricingComparison,
+    asian_pricing_rmse_vs_mc_oracle,
     pricing_rmse_vs_carr_madan,
     pricing_rmse_vs_mc_oracle,
 )
@@ -31,6 +32,8 @@ def build_full_report(
     params: HestonParams | None = None,
     moneynesses: Sequence[float] = (0.85, 0.90, 0.95, 1.0, 1.05),
     maturities: Sequence[float] = (0.25, 0.5, 1.0),
+    asian_moneynesses: Sequence[float] | None = None,
+    asian_maturities: Sequence[float] | None = None,
     dt: float = 1.0 / 252.0,
     pricing_r: float = 0.0,
     signature_depth: int | None = 3,
@@ -100,6 +103,17 @@ def build_full_report(
             r=pricing_r,
         )
         out["pricing_fake_vs_mc_oracle"] = oracle_pricing.to_dict()
+        asian_moneynesses_resolved = asian_moneynesses if asian_moneynesses is not None else moneynesses
+        asian_maturities_resolved = asian_maturities if asian_maturities is not None else maturities
+        asian_oracle_pricing: PricingComparison = asian_pricing_rmse_vs_mc_oracle(
+            fake_s_paths,
+            oracle_s_paths,
+            dt=dt,
+            moneynesses=asian_moneynesses_resolved,
+            maturities=asian_maturities_resolved,
+            r=pricing_r,
+        )
+        out["asian_pricing_fake_vs_mc_oracle"] = asian_oracle_pricing.to_dict()
         if real_s_paths is not None:
             real_oracle_pricing: PricingComparison = pricing_rmse_vs_mc_oracle(
                 real_s_paths,
@@ -110,5 +124,14 @@ def build_full_report(
                 r=pricing_r,
             )
             out["pricing_real_vs_mc_oracle"] = real_oracle_pricing.to_dict()
+            real_asian_oracle_pricing: PricingComparison = asian_pricing_rmse_vs_mc_oracle(
+                real_s_paths,
+                oracle_s_paths,
+                dt=dt,
+                moneynesses=asian_moneynesses_resolved,
+                maturities=asian_maturities_resolved,
+                r=pricing_r,
+            )
+            out["asian_pricing_real_vs_mc_oracle"] = real_asian_oracle_pricing.to_dict()
 
     return out
