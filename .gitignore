@@ -45,10 +45,6 @@ env/
 *.blg
 *.out
 
-# Course report and presentation
-/paper/
-/presentation/
-
 # Large bundled archives (local-only; extracted contents are committed where small)
 *.tar
 *.tgz
