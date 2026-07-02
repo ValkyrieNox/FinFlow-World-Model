@@ -1,5 +1,5 @@
 {
-  "run_dir": "/root/autodl-tmp/Heston-Model/runs/experiments/p3_full_parallel/training/joint_distill_0615/mf/joint_mf_ema060_bs4096_e15_0615",
+  "run_dir": "runs/experiments/p3_full_parallel/training/joint_distill_0615/mf/joint_mf_ema060_bs4096_e15_0615",
   "stage": "joint",
   "num_actions": 3,
   "student_config": {
@@ -32,7 +32,7 @@
     "progress": true,
     "progress_min_interval": 0.2
   },
-  "teacher_checkpoint": "/root/autodl-tmp/Heston-Model/runs/experiments/p3_full_parallel/training/joint_fm/joint_fm_512x6_bs8192_e60_ad0_lr2e4_ema9999_0613/checkpoints/ema_epoch_060.pt",
+  "teacher_checkpoint": "runs/experiments/p3_full_parallel/training/joint_fm/joint_fm_512x6_bs8192_e60_ad0_lr2e4_ema9999_0613/checkpoints/ema_epoch_060.pt",
   "teacher_lambert_w_delta": 0.0,
   "warm_started_params": 57,
   "normalization": {
@@ -41,5 +41,5 @@
     "return_mean": 7.696966349612921e-05,
     "return_std": 0.013751840218901634
   },
-  "data_dir": "/root/autodl-tmp/Heston-Model/runs/experiments/p3_full_parallel/data"
+  "data_dir": "runs/experiments/p3_full_parallel/data"
 }

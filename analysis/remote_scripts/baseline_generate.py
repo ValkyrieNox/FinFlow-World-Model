@@ -11,12 +11,12 @@ form so it is directly comparable to the FM / QGAN rows. Calibration mirrors
 rollout.py::_calibrate_returns exactly: pool returns, standardize, rescale by the
 data's return_std/return_mean, rebuild S from s0.
 """
-import json, sys, time
+import json, os, sys, time
 from pathlib import Path
 import numpy as np
 from scipy import optimize, special
 
-P = Path("/root/autodl-tmp/Heston-Model/runs/experiments/p3_full_parallel")
+P = Path(os.environ.get("FINFLOW_EXPERIMENT_ROOT", "runs/experiments/p3_full_parallel"))
 DATA = P / "data"
 meta = json.load(open(DATA / "metadata.json"))
 RET_MEAN = meta["normalization"]["return_mean"]

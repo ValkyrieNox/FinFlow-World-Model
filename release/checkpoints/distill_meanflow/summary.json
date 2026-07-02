@@ -235,7 +235,7 @@
     }
   ],
   "device": "cuda",
-  "teacher_checkpoint": "/root/autodl-tmp/Heston-Model/runs/experiments/p3_full_parallel/training/joint_fm/joint_fm_512x6_bs8192_e60_ad0_lr2e4_ema9999_0613/checkpoints/ema_epoch_060.pt",
+  "teacher_checkpoint": "runs/experiments/p3_full_parallel/training/joint_fm/joint_fm_512x6_bs8192_e60_ad0_lr2e4_ema9999_0613/checkpoints/ema_epoch_060.pt",
   "warm_started_params": 57,
   "total_time_s": 1223.931357126683
 }

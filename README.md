@@ -4,6 +4,7 @@
 
 - 论文源码：[paper/Report.tex](paper/Report.tex)
 - PDF版：[paper/Report.pdf](paper/Report.pdf)
+- 课堂汇报 PPT：[presentation/FinFlow_世界模型_课程报告.pptx](presentation/FinFlow_世界模型_课程报告.pptx)，该 PPT 为中间过程材料，最终完整结果以 [paper/Report.pdf](paper/Report.pdf) 为准。
 - 终版权重与结果索引：[release/README.md](release/README.md)
 
 FinFlow 将市场建模为动作条件世界模型：外部智能体选择正常、高波动、崩盘三类离散区制，模型学习单步转移核

@@ -1,5 +1,5 @@
 import json, os
-P = "/root/autodl-tmp/Heston-Model/runs/experiments/p3_full_parallel"
+P = os.environ.get("FINFLOW_EXPERIMENT_ROOT", "runs/experiments/p3_full_parallel")
 E = P + "/evaluation"  # unused
 
 def j(path):

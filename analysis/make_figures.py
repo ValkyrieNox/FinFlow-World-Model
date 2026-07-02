@@ -11,10 +11,21 @@ from matplotlib.collections import LineCollection
 from matplotlib import animation
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
-DATA = os.path.join(ROOT, "p3_full_parallel_data")
+PROJECT_ROOT = os.path.dirname(ROOT)
+
+
+def first_existing_dir(*paths):
+    for path in paths:
+        if os.path.isdir(path):
+            return path
+    return paths[-1]
+
+
+DATA = first_existing_dir(os.path.join(ROOT, "p3_full_parallel_data"),
+                          os.path.join(PROJECT_ROOT, "data"))
 VIZ = os.path.join(ROOT, "viz_data")
 JSON = os.path.join(ROOT, "eval_json_backup", "json")
-OUT = os.path.join(ROOT, "figures")
+OUT = os.environ.get("FINFLOW_FIGURE_OUT", os.path.join(ROOT, "figures"))
 os.makedirs(OUT, exist_ok=True)
 plt.rcParams.update({"figure.dpi": 130, "savefig.dpi": 160, "font.size": 12,
                      "axes.grid": True, "grid.alpha": 0.25, "axes.spines.top": False,
@@ -23,14 +34,19 @@ plt.rcParams.update({"figure.dpi": 130, "savefig.dpi": 160, "font.size": 12,
 REGIME_COLORS = {0: "#2ca02c", 1: "#ff7f0e", 2: "#d62728"}
 REGIME_NAMES = {0: "Normal", 1: "High-vol", 2: "Crash"}
 
-meta = json.load(open(os.path.join(DATA, "metadata.json")))
+meta_path = os.path.join(DATA, "metadata.json")
+meta = json.load(open(meta_path)) if os.path.exists(meta_path) else {}
 
 
 def load_paths(path):
     """Return (s_paths [N,T+1], returns [N,T], actions or None)."""
     if not os.path.exists(path):
         return None
-    d = np.load(path)
+    try:
+        d = np.load(path)
+    except Exception as e:
+        print(f"[skip] unreadable rollout file {path}: {e}")
+        return None
     s = np.asarray(d["s_paths"], float)
     if "log_returns" in d.files:
         r = np.asarray(d["log_returns"], float)

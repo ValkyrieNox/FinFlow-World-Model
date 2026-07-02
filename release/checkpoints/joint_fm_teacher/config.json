@@ -1,5 +1,5 @@
 {
-  "run_dir": "/root/autodl-tmp/Heston-Model/runs/experiments/p3_full_parallel/training/joint_fm/joint_fm_512x6_bs8192_e60_ad0_lr2e4_ema9999_0613",
+  "run_dir": "runs/experiments/p3_full_parallel/training/joint_fm/joint_fm_512x6_bs8192_e60_ad0_lr2e4_ema9999_0613",
   "stage": "joint",
   "num_actions": 3,
   "model_config": {
@@ -40,7 +40,7 @@
     "return_mean": 7.696966349612921e-05,
     "return_std": 0.013751840218901634
   },
-  "data_dir": "/root/autodl-tmp/Heston-Model/runs/experiments/p3_full_parallel/data",
+  "data_dir": "runs/experiments/p3_full_parallel/data",
   "kind": "fm",
   "transition_type": "joint_vr",
   "condition": [

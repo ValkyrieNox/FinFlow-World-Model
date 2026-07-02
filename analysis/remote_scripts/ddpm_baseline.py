@@ -12,18 +12,18 @@ Stage alignment (matches finflow.data.heston):
   vol: target = log_v_{t+1}_norm,  cond = [log_v_t_norm, onehot(a_t)]          (dim 1+A)
   ret: target = r_t_norm,          cond = [log_v_{t+1}_norm, log_v_t_norm, r_{t-1}_norm, onehot(a_t)] (dim 3+A)
 """
-import argparse, json, sys, time, math
+import argparse, json, os, sys, time, math
 from pathlib import Path
 import numpy as np
 import torch
 from torch import nn
 
-WT = Path("/root/autodl-tmp/Heston-Model-pathwise-3ad5756")
-sys.path.insert(0, str(WT))
+PROJECT_ROOT = Path(os.environ.get("FINFLOW_PROJECT_ROOT", ".")).resolve()
+sys.path.insert(0, str(PROJECT_ROOT))
 from finflow.models import TransitionFM
 from finflow.inference.rollout import autoregressive_rollout
 
-P = Path("/root/autodl-tmp/Heston-Model/runs/experiments/p3_full_parallel")
+P = Path(os.environ.get("FINFLOW_EXPERIMENT_ROOT", "runs/experiments/p3_full_parallel"))
 DATA = P / "data"
 OUT = P / "eval_ddpm_baseline_0603"
 OUT.mkdir(exist_ok=True)
