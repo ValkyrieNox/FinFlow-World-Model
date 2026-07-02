@@ -69,7 +69,7 @@ MET = {
  "Quant-GAN (last)":  (5.429, 0.674, 6.39, 0.0050, 0.0035, 4.03, 0.02033),
  "Block-bootstrap":   (0.269, 0.244, 4.58, 0.0354, 0.0040, 4.30, 0.00588),
 }
-REAL_KURT, REAL_TAIL, FLOOR = 4.60, 4.28, 0.165
+REAL_KURT, REAL_TAIL, FINITE_SAMPLE_RMSE = 4.60, 4.28, 0.1646
 NFE_K = [1, 2, 4, 8]
 NFE_RAW = [2.736, 1.819, 3.090, 3.437]
 NFE_CAL = [0.313, 2.355, 3.745, 3.857]
@@ -160,7 +160,13 @@ def fig_nfe():
     fig, ax = plt.subplots(figsize=(6.5, 4.4))
     ax.plot(NFE_K, NFE_RAW, "o-", color="#1f77b4", lw=2, ms=8, label="raw pricing RMSE")
     ax.plot(NFE_K, NFE_CAL, "s-", color="#d62728", lw=2, ms=8, label="calibrated pricing RMSE")
-    ax.axhline(FLOOR, color="gray", ls="--", lw=1, label=f"MC floor {FLOOR}")
+    ax.axhline(
+        FINITE_SAMPLE_RMSE,
+        color="gray",
+        ls="--",
+        lw=1,
+        label=f"finite-sample ref {FINITE_SAMPLE_RMSE}",
+    )
     ax.annotate("raw knee\n(2 steps)", (2, 1.819), textcoords="offset points", xytext=(10, 18),
                 color="#1f77b4", arrowprops=dict(arrowstyle="->", color="#1f77b4"))
     ax.annotate("cal best\n(1 step)", (1, 0.313), textcoords="offset points", xytext=(12, 30),
@@ -277,12 +283,13 @@ def fig_pareto():
     GRAY, GRAYT, RED, FRONT = "#9aa6b2", "#7a8794", "#e8463a", "#69c5b4"
     fig, ax = plt.subplots(figsize=(11.6, 7.0))
     ax.grid(True, color="#dfe3e8", lw=0.8, zorder=0); ax.set_axisbelow(True)
-    # artifact zone + floor
-    ax.axhspan(0, FLOOR, color="#f4cbc6", alpha=0.55, zorder=0)
-    ax.axhline(FLOOR, color=RED, ls="--", lw=2.2, zorder=2)
-    ax.text(0.12, FLOOR + 0.012, "定价地板 0.165 — 连真实数据都做不到更低",
+    # Region below the finite-sample reference can be useful, but should not
+    # be read as a theoretical lower bound.
+    ax.axhspan(0, FINITE_SAMPLE_RMSE, color="#f4cbc6", alpha=0.55, zorder=0)
+    ax.axhline(FINITE_SAMPLE_RMSE, color=RED, ls="--", lw=2.2, zorder=2)
+    ax.text(0.12, FINITE_SAMPLE_RMSE + 0.012, "有限样本参照 0.1646",
             color=RED, fontsize=12, va="bottom", ha="left")
-    ax.text(0.30, 0.072, "校准假象区  cal < 0.165", color=RED, fontsize=14,
+    ax.text(0.30, 0.072, "低于有限样本参照的校准区", color=RED, fontsize=14,
             fontweight="bold", va="center", ha="left")
     # trade-off frontier (trend) through the champions
     fx = [0.475, 0.872, 1.875, 2.595]; fy = [0.583, 0.348, 0.170, 0.180]
