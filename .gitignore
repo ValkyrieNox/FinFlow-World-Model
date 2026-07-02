@@ -66,3 +66,4 @@ env/
 # remain tracked. The global *.pt rule above already ignores the weights.
 # The packaged weight archive is distributed via 网盘; only its checksum is tracked.
 /release/checkpoints.tar.gz
+/release/data.tar.gz

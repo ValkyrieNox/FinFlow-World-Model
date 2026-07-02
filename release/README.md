@@ -1,20 +1,26 @@
 # Release — 终版权重与实验结果
 
-本目录汇集论文 [`../paper/Report.pdf`](../paper/Report.pdf) 报告的终版模型权重与对应的原始（raw，未校准）评测结果。基础 RMSE / MAPE 为生成路径上欧式期权价格相对 10 万条 MC oracle 的误差；基础 15 点欧式协议下，真实测试集相对同一 MC oracle 的有限样本参照为 RMSE `0.1646`、MAPE `0.0112`。新增的 Asian RMSE 使用同一 oracle 的算术平均亚式看涨 payoff；峰度目标 4.60。
+本目录汇集论文 [`../paper/Report.pdf`](../paper/Report.pdf) 报告的终版模型权重、Heston 数据归档与对应的原始（raw，未校准）评测结果。基础 RMSE / MAPE 为生成路径上欧式期权价格相对 10 万条 MC oracle 的误差；基础 15 点欧式协议下，真实测试集相对同一 MC oracle 的有限样本参照为 RMSE `0.1646`、MAPE `0.0112`。新增的 Asian RMSE 使用同一 oracle 的算术平均亚式看涨 payoff；峰度目标 4.60。
 
 - `checkpoints/` — 一步学生权重（`best.pt` + `config.json` + `summary.json`）。每个 `best.pt` 约 112MB，**超过 GitHub 100MB/文件上限，故未纳入 git，改用网盘分发**；其 `config.json` / `summary.json` 已随仓库提交。
+- `../data/`    — Heston 训练、验证、测试、transition 与 MC oracle 数据。GitHub 只跟踪 `metadata.json` / `mc_oracle.json`；完整 `.npz` 数据由 `data.tar.gz` 在同一网盘链接分发。
 - `results/`     — 对应评测 JSON（随仓库提交）。`*_metrics.json` 为精简指标，无 `_metrics` 后缀者含完整逐点定价与风格化事实；表 4 的完整价值度曲面汇总位于 `results/onpolicy/summary_full_surface.*`。
 
-### 权重下载与解压
+### 数据与权重下载
 
 > 📦 **北大网盘**：<https://disk.pku.edu.cn/link/AA5FFF5F5BD0AF446AA0BC210401887C2D>
 
+从网盘下载 `checkpoints.tar.gz` 与 `data.tar.gz`，放到仓库根目录的 `release/` 下，然后运行：
+
 ```bash
-tar -xzf release/checkpoints.tar.gz -C release/   # 在仓库根目录解压
-sha256sum -c release/checkpoints.tar.gz.sha256    # 可选：校验完整性
+sha256sum -c release/checkpoints.tar.gz.sha256
+sha256sum -c release/data.tar.gz.sha256
+
+tar -xzf release/checkpoints.tar.gz -C release/   # 还原 release/checkpoints/
+tar -xzf release/data.tar.gz -C .                 # 还原 data/*.npz 与 data/*.json
 ```
 
-打包文件 `checkpoints.tar.gz` 解压后即还原下表的 `checkpoints/` 结构。
+打包文件 `checkpoints.tar.gz` 解压后即还原下表的 `checkpoints/` 结构；`data.tar.gz` 解压后还原 `data/train.npz`、`data/val.npz`、`data/test.npz`、`data/*_transitions.npz` 与 `data/mc_oracle.npz`。两个压缩包均未纳入 git，只提交对应 `.sha256` 校验文件。
 
 下表中 RMSE 默认沿用基础 15 点欧式协议。表 4 使用 17×3 完整价值度曲面与亚式期权重新选择 checkpoint；该协议下最终 checkpoint 为 `onpolicy_flowmap/nfe120_h64_s30_e4/`，欧式 RMSE 为 `0.0917`，Asian RMSE 为 `0.0525`。
 

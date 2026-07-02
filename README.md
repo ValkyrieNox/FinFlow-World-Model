@@ -32,7 +32,7 @@ p_theta(log v_{t+1}, r_t | log v_t, r_{t-1}, a_t)
 | Pricing-aware flow-map | 0.158 | 0.0174 | 3.350 | NFE1 |
 | **On-policy flow-map** | **0.101** | 0.0110 | 4.356 | **NFE1** |
 
-完整统一对比、三类蒸馏、定价微调和 on-policy 消融见 [paper/Report.pdf](paper/Report.pdf) 表 1--5；正式评测 JSON 与 full-surface 汇总位于 [release/results/](release/results/)。其中 `0.1646` 是基础 15 点欧式协议下真实测试集相对 MC 基准的有限样本参照，不是模型性能的理论下界。完整 Heston `.npz` 数据按运行约定直接放在 `data/` 根目录；由于多个文件超过 GitHub 100MB 单文件限制，git 只跟踪 `data/*.json` 元数据，完整 `.npz` 数据需本地放置或按下方命令重新生成。本地运行产生的 `runs/` 是临时实验输出目录，不作为最终交付内容。
+完整统一对比、三类蒸馏、定价微调和 on-policy 消融见 [paper/Report.pdf](paper/Report.pdf) 表 1--5；正式评测 JSON 与 full-surface 汇总位于 [release/results/](release/results/)。其中 `0.1646` 是基础 15 点欧式协议下真实测试集相对 MC 基准的有限样本参照，不是模型性能的理论下界。完整 Heston `.npz` 数据按运行约定直接放在 `data/` 根目录；由于多个文件超过 GitHub 100MB 单文件限制，git 只跟踪 `data/*.json` 元数据，完整 `.npz` 数据通过 [release/README.md](release/README.md) 中的网盘压缩包分发，也可按下方命令重新生成。本地运行产生的 `runs/` 是临时实验输出目录，不作为最终交付内容。
 
 ## 方法入口
 
