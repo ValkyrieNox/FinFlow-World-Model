@@ -18,7 +18,7 @@ from finflow.training import TwoStageFMModelConfig, load_checkpoint, load_num_ac
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--data-dir", type=Path, default=Path("data/heston_v3"))
+    parser.add_argument("--data-dir", type=Path, default=Path("data"))
     parser.add_argument("--teacher-checkpoint", type=Path, required=True)
     parser.add_argument("--stage", choices=("vol", "ret", "joint"), required=True)
     parser.add_argument("--output-dir", type=Path, default=None,

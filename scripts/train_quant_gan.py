@@ -17,7 +17,7 @@ from finflow.baselines import QuantGANConfig, QuantGANTrainConfig, train_quant_g
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--data-dir", type=Path, default=Path("data/heston_v3"))
+    parser.add_argument("--data-dir", type=Path, default=Path("data"))
     parser.add_argument("--output-dir", type=Path, default=Path("runs/quant_gan"))
     parser.add_argument("--run-name", type=str, default=None)
 

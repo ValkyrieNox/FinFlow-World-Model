@@ -24,11 +24,11 @@ env/
 *.npz
 *.npy
 
-# Small canonical Heston dataset (about 9MB) is versioned.
+# Canonical Heston metadata is versioned. Full .npz datasets live directly under
+# data/ for local runs, but remain ignored because several files exceed
+# GitHub's 100MB/file limit.
 !/data/
-!/data/heston_v3/
-!/data/heston_v3/*.json
-!/data/heston_v3/*.npz
+!/data/*.json
 
 # Local logs and notebooks
 *.log
@@ -44,6 +44,10 @@ env/
 *.bbl
 *.blg
 *.out
+
+# Course report and presentation
+/paper/
+/presentation/
 
 # Large bundled archives (local-only; extracted contents are committed where small)
 *.tar

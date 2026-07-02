@@ -3,7 +3,7 @@
 Generate the default V3 dataset:
 
 ```bash
-python3 scripts/generate_heston_data.py --output data/heston_v3
+python3 scripts/generate_heston_data.py --output data
 ```
 
 For a small smoke run:

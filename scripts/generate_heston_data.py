@@ -29,7 +29,7 @@ from finflow.data import (
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--output", type=Path, default=Path("data/heston_v3"))
+    parser.add_argument("--output", type=Path, default=Path("data"))
     parser.add_argument("--n-train", type=int, default=50_000)
     parser.add_argument("--n-val", type=int, default=5_000)
     parser.add_argument("--n-test", type=int, default=10_000)

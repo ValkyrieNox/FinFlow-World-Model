@@ -24,7 +24,7 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--checkpoint", type=Path, required=True)
     parser.add_argument(
-        "--data-dir", type=Path, default=Path("data/heston_v3"),
+        "--data-dir", type=Path, default=Path("data"),
         help="used to read normalization + transition matrix (if --regime-actions)",
     )
     parser.add_argument("--output", type=Path, default=Path("runs/rollout_joint.npz"))

@@ -5,17 +5,17 @@
     "val": 5000,
     "test": 10000
   },
-  "seed": 1234,
+  "seed": 20260530,
   "save_transitions": true,
   "transition_alignment": {
     "condition": "(v_t, r_{t-1}, a_t) with r_{-1}=0",
     "target": "(v_{t+1}, r_t)"
   },
   "normalization": {
-    "log_v_mean": -3.2954514026641846,
-    "log_v_std": 0.7749020457267761,
-    "return_mean": 7.525199907831848e-05,
-    "return_std": 0.013786595314741135
+    "log_v_mean": -3.3005776405334473,
+    "log_v_std": 0.7750805616378784,
+    "return_mean": 7.696966349612921e-05,
+    "return_std": 0.013751840218901634
   },
   "v0": 0.04,
   "s0": 100.0,

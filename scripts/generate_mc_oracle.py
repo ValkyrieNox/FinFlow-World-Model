@@ -141,7 +141,7 @@ def generate_mc_oracle(
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--data-dir", type=Path, default=Path("data/heston_v3"))
+    parser.add_argument("--data-dir", type=Path, default=Path("data"))
     parser.add_argument("--output", type=Path, default=None,
                         help="default: DATA_DIR/mc_oracle.npz")
     parser.add_argument("--n-paths", type=int, default=100_000)

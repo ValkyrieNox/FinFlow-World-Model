@@ -22,7 +22,7 @@ from finflow.training import (
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--data-dir", type=Path, default=Path("data/heston_v3"))
+    parser.add_argument("--data-dir", type=Path, default=Path("data"))
     parser.add_argument("--output-dir", type=Path, default=Path("runs/joint_trans_fm"))
     parser.add_argument("--run-name", type=str, default=None)
     parser.add_argument(

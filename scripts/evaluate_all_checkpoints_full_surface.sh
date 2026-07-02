@@ -6,7 +6,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
-DATA_DIR="${DATA_DIR:-$REPO_ROOT/data/heston_v3}"
+DATA_DIR="${DATA_DIR:-$REPO_ROOT/data}"
 CHECKPOINT_ROOT="${CHECKPOINT_ROOT:-$REPO_ROOT/release/checkpoints}"
 OUT_DIR="${OUT_DIR:-$REPO_ROOT/runs/full_surface_eval}"
 PYTHON_BIN="${PYTHON:-python}"

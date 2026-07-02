@@ -32,7 +32,7 @@ p_theta(log v_{t+1}, r_t | log v_t, r_{t-1}, a_t)
 | Pricing-aware flow-map | 0.158 | 0.0174 | 3.350 | NFE1 |
 | **On-policy flow-map** | **0.101** | 0.0110 | 4.356 | **NFE1** |
 
-完整统一对比、三类蒸馏、定价微调和 on-policy 消融见 [paper/Report.pdf](paper/Report.pdf) 表 1--5；正式评测 JSON 与 full-surface 汇总位于 [release/results/](release/results/)。其中 `0.1646` 是基础 15 点欧式协议下真实测试集相对 MC 基准的有限样本参照，不是模型性能的理论下界。本地运行产生的 `runs/` 是临时实验输出目录，不作为最终交付内容。
+完整统一对比、三类蒸馏、定价微调和 on-policy 消融见 [paper/Report.pdf](paper/Report.pdf) 表 1--5；正式评测 JSON 与 full-surface 汇总位于 [release/results/](release/results/)。其中 `0.1646` 是基础 15 点欧式协议下真实测试集相对 MC 基准的有限样本参照，不是模型性能的理论下界。完整 Heston `.npz` 数据按运行约定直接放在 `data/` 根目录；由于多个文件超过 GitHub 100MB 单文件限制，git 只跟踪 `data/*.json` 元数据，完整 `.npz` 数据需本地放置或按下方命令重新生成。本地运行产生的 `runs/` 是临时实验输出目录，不作为最终交付内容。
 
 ## 方法入口
 
@@ -56,7 +56,7 @@ finflow/                 核心包：数据、模型、采样、评测与基线
   inference/             统一采样与自回归 rollout
   eval/                  定价、风格化事实与距离指标
 scripts/                 训练、蒸馏、rollout、评测 CLI
-data/heston_v3/          Heston 数据集、划分与 MC oracle
+data/                    Heston 数据集、划分与 MC oracle
 analysis/                可视化数据与论文配图
 paper/                   中文报告源码、PDF 与参考文献
 release/                 终版配置、结果 JSON 与权重下载说明
@@ -70,32 +70,32 @@ pip install -r requirements.txt
 
 # 1) 生成三区制 Heston 数据与 MC oracle
 python3 scripts/generate_heston_data.py \
-  --output data/heston_v3 --n-train 50000 --n-val 5000 --n-test 10000 \
+  --output data --n-train 50000 --n-val 5000 --n-test 10000 \
   --steps 252 --regimes --seed 1234
 python3 scripts/generate_mc_oracle.py \
-  --data-dir data/heston_v3 --output data/heston_v3/mc_oracle.npz --n-paths 100000
+  --data-dir data --output data/mc_oracle.npz --n-paths 100000
 
 # 2) 训练 joint-FM teacher
 python3 scripts/train_joint_trans.py \
-  --data-dir data/heston_v3 --output-dir runs/joint_fm \
+  --data-dir data --output-dir runs/joint_fm \
   --hidden-dim 512 --num-blocks 6 --batch-size 8192 --epochs 60 --lr 2e-4
 
 # 3) 选择 teacher 检查点
 python3 scripts/select_joint_checkpoint.py \
   --checkpoints "runs/joint_fm/<run>/checkpoints/ema_epoch_*.pt" \
-  --data-dir data/heston_v3 --mc-oracle data/heston_v3/mc_oracle.npz \
+  --data-dir data --mc-oracle data/mc_oracle.npz \
   --nfe-steps 120 --rank-by pricing_rmse --regime-actions \
   --output runs/joint_fm/selection.json
 
 # 4) 训练基础 flow-map 一步学生
 python3 scripts/distill_flow_map.py --stage joint \
   --teacher-checkpoint runs/joint_fm/<run>/checkpoints/ema_epoch_060.pt \
-  --data-dir data/heston_v3 --output-dir runs/joint_distill \
+  --data-dir data --output-dir runs/joint_distill \
   --epochs 15 --batch-size 4096
 
 # 5) on-policy teacher-endpoint 修正
 python3 scripts/finetune_flow_map_onpolicy.py \
-  --data-dir data/heston_v3 --mc-oracle data/heston_v3/mc_oracle.npz \
+  --data-dir data --mc-oracle data/mc_oracle.npz \
   --init-checkpoint runs/joint_distill/<run>/checkpoints/best.pt \
   --teacher-checkpoint runs/joint_fm/<run>/checkpoints/ema_epoch_060.pt \
   --output-dir runs/joint_onpolicy \
@@ -107,8 +107,8 @@ python3 scripts/rollout_joint.py \
   --checkpoint runs/joint_onpolicy/<run>/checkpoints/best.pt \
   --output runs/rollout_onpolicy.npz --n-paths 10000 --n-steps 252
 python3 scripts/evaluate_rollout.py \
-  --real data/heston_v3/test.npz --fake runs/rollout_onpolicy.npz \
-  --mc-oracle data/heston_v3/mc_oracle.npz --output runs/eval_onpolicy.json \
+  --real data/test.npz --fake runs/rollout_onpolicy.npz \
+  --mc-oracle data/mc_oracle.npz --output runs/eval_onpolicy.json \
   --moneynesses 0.85 0.9 0.95 1.0 1.05 --maturities 0.25 0.5 1.0
 
 # 可选：测试与配图
