@@ -93,7 +93,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--mc-oracle", type=Path, default=None,
                         help="independent oracle npz containing s_paths for MC price reference")
     parser.add_argument("--moneynesses", nargs="+", type=float,
-                        default=[0.85, 0.90, 0.95, 1.00, 1.05])
+                        default=[0.60, 0.70, 0.80, 0.85, 0.90, 0.95,
+                                 1.00, 1.05, 1.10, 1.20, 1.30, 1.50],
+                        help="European-call moneyness grid K/S0")
     parser.add_argument("--maturities", nargs="+", type=float,
                         default=[0.25, 0.5, 1.0])
     parser.add_argument("--asian-moneynesses", nargs="+", type=float, default=None,

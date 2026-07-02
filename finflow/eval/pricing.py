@@ -105,8 +105,8 @@ def mc_arithmetic_asian_call_prices_grid(
     """Monte Carlo arithmetic-Asian call prices on the ``(K, T)`` grid.
 
     For each maturity, the payoff is ``max(mean(S_1, ..., S_T) - K, 0)``.
-    This uses the full path up to maturity, unlike the European-call evaluator
-    which only uses the terminal value ``S_T``.
+    This intentionally uses the full path up to the maturity, unlike the
+    European-call evaluator which only uses the terminal value ``S_T``.
     """
 
     s_paths = np.asarray(s_paths, dtype=np.float64)

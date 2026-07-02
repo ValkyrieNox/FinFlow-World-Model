@@ -1,14 +1,15 @@
-#!/usr/bin/env bash
+﻿#!/usr/bin/env bash
 set -euo pipefail
 
-# Batch rollout + evaluation for all release best.pt checkpoints under the
-# full-surface protocol used by Table 4.
+# Batch rollout + evaluation for all joint best.pt checkpoints.
+# Works in Git Bash / WSL-style shells. On native Windows cmd, run via:
+#   bash scripts/evaluate_all_checkpoints_full_surface.sh
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
-DATA_DIR="${DATA_DIR:-$REPO_ROOT/data/heston_v3}"
-CHECKPOINT_ROOT="${CHECKPOINT_ROOT:-$REPO_ROOT/release/checkpoints}"
-OUT_DIR="${OUT_DIR:-$REPO_ROOT/runs/full_surface_eval}"
+DATA_DIR="$REPO_ROOT/data/heston_v3"
+CHECKPOINT_ROOT="$REPO_ROOT/release/checkpoints"
+OUT_DIR="$REPO_ROOT/runs/full_surface_eval"
 PYTHON_BIN="${PYTHON:-python}"
 N_PATHS="${N_PATHS:-10000}"
 N_STEPS="${N_STEPS:-252}"
@@ -16,8 +17,6 @@ DEVICE="${DEVICE:-auto}"
 FM_N_STEPS="${FM_N_STEPS:-20}"
 FM_SOLVER="${FM_SOLVER:-euler}"
 SIGNATURE_DEPTH="${SIGNATURE_DEPTH:-3}"
-ACTION_SEED="${ACTION_SEED:-20260701}"
-NOISE_SEED="${NOISE_SEED:-20260701}"
 LIMIT="${LIMIT:-}"
 FORCE="${FORCE:-0}"
 CALIBRATE_MOMENTS="${CALIBRATE_MOMENTS:-0}"
@@ -35,6 +34,8 @@ MONEYNESS=(
   1.00 1.05 1.10 1.15 1.20 1.30 1.40 1.50 1.75 2.00
 )
 MATURITIES=(0.25 0.5 1.0)
+ASIAN_MONEYNESS=("${MONEYNESS[@]}")
+ASIAN_MATURITIES=("${MATURITIES[@]}")
 
 usage() {
   cat <<USAGE
@@ -43,23 +44,17 @@ Usage:
 
 Environment overrides:
   PYTHON=/path/to/python
-  DATA_DIR=$DATA_DIR
-  CHECKPOINT_ROOT=$CHECKPOINT_ROOT
-  OUT_DIR=$OUT_DIR
   N_PATHS=10000
   DEVICE=auto|cpu|cuda
   FM_N_STEPS=20
   FM_SOLVER=euler|heun
   SIGNATURE_DEPTH=3
-  ACTION_SEED=20260701
-  NOISE_SEED=20260701
   LIMIT=10000          optional; if empty, no limit
   FORCE=1             regenerate existing rollouts/evals
   CALIBRATE_MOMENTS=1 optional rollout moment calibration
 
 Outputs:
-  $SUMMARY_CSV
-  $SUMMARY_JSON
+  $OUT_DIR
 USAGE
 }
 
@@ -82,6 +77,7 @@ mapfile -t CHECKPOINTS < <(
   find "$CHECKPOINT_ROOT" -type f -name 'best.pt' \
     ! -path "$CHECKPOINT_ROOT/checkpoints/*" | sort
 )
+
 if [[ ${#CHECKPOINTS[@]} -eq 0 ]]; then
   echo "No best.pt checkpoints found under $CHECKPOINT_ROOT" >&2
   exit 1
@@ -95,19 +91,20 @@ printf 'N checkpoints  : %s\n' "${#CHECKPOINTS[@]}"
 printf 'Moneynesses    : %s\n' "${MONEYNESS[*]}"
 printf 'Maturities     : %s\n' "${MATURITIES[*]}"
 
-printf 'model,checkpoint,rollout,eval_json,vanilla_rmse,vanilla_mape,asian_rmse,asian_mape,marginal_w1_mean,marginal_w1_max,total_return_w1,abs_total_return_w1,sig_w1_mean\n' > "$SUMMARY_CSV"
-
+JSON_SPECS=()
 idx=0
 for ckpt in "${CHECKPOINTS[@]}"; do
   idx=$((idx + 1))
-  rel="${ckpt#$CHECKPOINT_ROOT/}"
-  model="${rel%/best.pt}"
-  safe="${model//\//_}"
+  ckpt_dir="$(dirname "$ckpt")"
+  rel="${ckpt_dir#$CHECKPOINT_ROOT/}"
+  safe="$(printf '%s' "$rel" | sed -E 's#[\\/:*?"<>| ]+#_#g; s#^_+##; s#_+$##')"
+  [[ -n "$safe" ]] || safe="checkpoint_$idx"
+
   rollout="$ROLLOUT_DIR/$safe.npz"
   eval_json="$EVAL_DIR/$safe.json"
 
-  printf '[%s/%s] %s\n' "$idx" "${#CHECKPOINTS[@]}" "$model"
-  if [[ "$FORCE" == "1" || ! -e "$rollout" ]]; then
+  printf '[%d/%d] Rollout: %s\n' "$idx" "${#CHECKPOINTS[@]}" "$rel"
+  if [[ "$FORCE" == "1" || ! -f "$rollout" ]]; then
     rollout_args=(
       "$REPO_ROOT/scripts/rollout_joint.py"
       --checkpoint "$ckpt"
@@ -116,8 +113,8 @@ for ckpt in "${CHECKPOINTS[@]}"; do
       --n-paths "$N_PATHS"
       --n-steps "$N_STEPS"
       --regime-actions
-      --action-seed "$ACTION_SEED"
-      --noise-seed "$NOISE_SEED"
+      --action-seed 20260701
+      --noise-seed 20260701
       --fm-n-steps "$FM_N_STEPS"
       --fm-solver "$FM_SOLVER"
       --device "$DEVICE"
@@ -125,10 +122,13 @@ for ckpt in "${CHECKPOINTS[@]}"; do
     if [[ "$CALIBRATE_MOMENTS" == "1" ]]; then
       rollout_args+=(--calibrate-moments)
     fi
-    "$PYTHON_BIN" "${rollout_args[@]}" >/dev/null
+    "$PYTHON_BIN" "${rollout_args[@]}"
+  else
+    echo "  existing rollout found; set FORCE=1 to regenerate"
   fi
 
-  if [[ "$FORCE" == "1" || ! -e "$eval_json" ]]; then
+  printf '[%d/%d] Evaluate: %s\n' "$idx" "${#CHECKPOINTS[@]}" "$rel"
+  if [[ "$FORCE" == "1" || ! -f "$eval_json" ]]; then
     eval_args=(
       "$REPO_ROOT/scripts/evaluate_rollout.py"
       --real "$REAL"
@@ -138,73 +138,60 @@ for ckpt in "${CHECKPOINTS[@]}"; do
       --output "$eval_json"
       --moneynesses "${MONEYNESS[@]}"
       --maturities "${MATURITIES[@]}"
-      --asian-moneynesses "${MONEYNESS[@]}"
-      --asian-maturities "${MATURITIES[@]}"
+      --asian-moneynesses "${ASIAN_MONEYNESS[@]}"
+      --asian-maturities "${ASIAN_MATURITIES[@]}"
       --signature-depth "$SIGNATURE_DEPTH"
     )
     if [[ -n "$LIMIT" ]]; then
       eval_args+=(--limit "$LIMIT")
     fi
     "$PYTHON_BIN" "${eval_args[@]}" >/dev/null
+  else
+    echo "  existing evaluation found; set FORCE=1 to recompute"
   fi
 
-  "$PYTHON_BIN" - "$model" "$ckpt" "$rollout" "$eval_json" "$SUMMARY_CSV" <<'PY'
-import csv
-import json
-import sys
-from pathlib import Path
-
-model, ckpt, rollout, eval_json, summary_csv = sys.argv[1:]
-report = json.loads(Path(eval_json).read_text(encoding="utf-8"))
-pricing = report["pricing_fake_vs_mc_oracle"]
-asian = report["asian_pricing_fake_vs_mc_oracle"]
-dist = report["distances"]
-sig = dist.get("signature_wasserstein") or {}
-row = {
-    "model": model,
-    "checkpoint": ckpt,
-    "rollout": rollout,
-    "eval_json": eval_json,
-    "vanilla_rmse": pricing.get("rmse_overall"),
-    "vanilla_mape": pricing.get("mape_overall"),
-    "asian_rmse": asian.get("rmse_overall"),
-    "asian_mape": asian.get("mape_overall"),
-    "marginal_w1_mean": dist.get("marginal_wasserstein_mean"),
-    "marginal_w1_max": dist.get("marginal_wasserstein_max"),
-    "total_return_w1": dist.get("total_return_wasserstein"),
-    "abs_total_return_w1": dist.get("abs_total_return_wasserstein"),
-    "sig_w1_mean": sig.get("mean"),
-}
-with Path(summary_csv).open("a", newline="", encoding="utf-8") as fh:
-    writer = csv.DictWriter(fh, fieldnames=list(row))
-    writer.writerow(row)
-PY
+  JSON_SPECS+=("$rel|$ckpt|$rollout|$eval_json")
 done
 
-"$PYTHON_BIN" - "$SUMMARY_CSV" "$SUMMARY_JSON" <<'PY'
+"$PYTHON_BIN" - "$SUMMARY_CSV" "$SUMMARY_JSON" "${JSON_SPECS[@]}" <<'PY'
+from __future__ import annotations
+
 import csv
 import json
 import sys
 from pathlib import Path
 
-rows = list(csv.DictReader(Path(sys.argv[1]).open(encoding="utf-8")))
-numeric_fields = {
-    "vanilla_rmse",
-    "vanilla_mape",
-    "asian_rmse",
-    "asian_mape",
-    "marginal_w1_mean",
-    "marginal_w1_max",
-    "total_return_w1",
-    "abs_total_return_w1",
-    "sig_w1_mean",
-}
-for row in rows:
-    for key in numeric_fields:
-        if row.get(key) not in (None, ""):
-            row[key] = float(row[key])
-Path(sys.argv[2]).write_text(json.dumps(rows, indent=2), encoding="utf-8")
-PY
+csv_path = Path(sys.argv[1])
+json_path = Path(sys.argv[2])
+rows = []
+for spec in sys.argv[3:]:
+    model, checkpoint, rollout, eval_json = spec.split('|', 3)
+    report = json.loads(Path(eval_json).read_text(encoding='utf-8'))
+    dist = report.get('distances', {})
+    pricing = report.get('pricing_fake_vs_mc_oracle') or {}
+    asian = report.get('asian_pricing_fake_vs_mc_oracle') or {}
+    sig = dist.get('signature_wasserstein') or {}
+    rows.append({
+        'model': model,
+        'checkpoint': checkpoint,
+        'rollout': rollout,
+        'eval_json': eval_json,
+        'vanilla_rmse': pricing.get('rmse_overall'),
+        'vanilla_mape': pricing.get('mape_overall'),
+        'asian_rmse': asian.get('rmse_overall'),
+        'asian_mape': asian.get('mape_overall'),
+        'marginal_w1_mean': dist.get('marginal_wasserstein_mean'),
+        'marginal_w1_max': dist.get('marginal_wasserstein_max'),
+        'total_return_w1': dist.get('total_return_wasserstein'),
+        'abs_total_return_w1': dist.get('abs_total_return_wasserstein'),
+        'sig_w1_mean': sig.get('mean'),
+    })
 
-printf 'Summary CSV : %s\n' "$SUMMARY_CSV"
-printf 'Summary JSON: %s\n' "$SUMMARY_JSON"
+csv_path.parent.mkdir(parents=True, exist_ok=True)
+with csv_path.open('w', newline='', encoding='utf-8') as f:
+    writer = csv.DictWriter(f, fieldnames=list(rows[0]))
+    writer.writeheader()
+    writer.writerows(rows)
+json_path.write_text(json.dumps(rows, indent=2), encoding='utf-8')
+print(f'Done.\nSummary CSV : {csv_path}\nSummary JSON: {json_path}')
+PY
